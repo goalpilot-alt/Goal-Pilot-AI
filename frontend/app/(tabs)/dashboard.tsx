@@ -3,7 +3,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
 import { Feather } from '@expo/vector-icons';
-import { colors, spacing, radii } from '../../src/theme';
+import { colors, spacing, radii, shadows } from '../../src/theme';
 import { api } from '../../src/api';
 import { useAuth } from '../../src/AuthContext';
 import ProgressRing from '../../src/ProgressRing';
@@ -205,7 +205,7 @@ const styles = StyleSheet.create({
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: spacing.lg },
   date: { color: colors.textTertiary, fontSize: 13, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 1 },
   greeting: { color: colors.textPrimary, fontSize: 28, fontWeight: '800', letterSpacing: -0.5, marginTop: 4 },
-  addBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', shadowColor: colors.primary, shadowOpacity: 0.5, shadowRadius: 10 },
+  addBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', boxShadow: shadows.primarySm },
   statsRow: { flexDirection: 'row', gap: spacing.md, marginBottom: spacing.lg },
   ringCard: { backgroundColor: colors.surface, borderRadius: radii.lg, padding: spacing.md, flex: 1.2, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.border },
   statsCol: { flex: 1, gap: spacing.sm },

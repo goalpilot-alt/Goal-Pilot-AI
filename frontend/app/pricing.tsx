@@ -3,7 +3,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import * as WebBrowser from 'expo-web-browser';
-import { colors, spacing, radii } from '../src/theme';
+import { colors, spacing, radii, shadows } from '../src/theme';
 import { api } from '../src/api';
 import { useAuth } from '../src/AuthContext';
 import { useEffect, useState } from 'react';
@@ -170,7 +170,7 @@ const styles = StyleSheet.create({
   saveBadge: { backgroundColor: colors.secondary, paddingVertical: 2, paddingHorizontal: 6, borderRadius: radii.sm },
   saveBadgeText: { color: colors.bg, fontSize: 10, fontWeight: '800' },
   card: { backgroundColor: colors.surface, borderRadius: radii.lg, padding: spacing.lg, marginBottom: spacing.md, borderWidth: 1, borderColor: colors.border },
-  cardHighlight: { borderColor: colors.primary, shadowColor: colors.primary, shadowOpacity: 0.3, shadowRadius: 20, shadowOffset: { width: 0, height: 4 } },
+  cardHighlight: { borderColor: colors.primary, boxShadow: shadows.primarySoft },
   cardActive: { borderColor: colors.success },
   popular: { position: 'absolute', top: -12, right: 16, backgroundColor: colors.primary, paddingVertical: 4, paddingHorizontal: 10, borderRadius: radii.full },
   popularText: { color: '#fff', fontSize: 10, fontWeight: '800', letterSpacing: 1.5 },

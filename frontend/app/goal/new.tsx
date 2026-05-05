@@ -3,7 +3,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
 import { Feather } from '@expo/vector-icons';
-import { colors, spacing, radii } from '../../src/theme';
+import { colors, spacing, radii, shadows } from '../../src/theme';
 import { api } from '../../src/api';
 import { useI18n } from '../../src/i18n/I18nProvider';
 
@@ -205,6 +205,6 @@ const styles = StyleSheet.create({
   hourChipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
   hourText: { color: colors.textPrimary, fontWeight: '700' },
   bottomBar: { padding: spacing.lg, borderTopWidth: 1, borderTopColor: colors.border },
-  nextBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.sm, backgroundColor: colors.primary, paddingVertical: 16, borderRadius: radii.full, shadowColor: colors.primary, shadowOpacity: 0.5, shadowRadius: 14 },
+  nextBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.sm, backgroundColor: colors.primary, paddingVertical: 16, borderRadius: radii.full, boxShadow: shadows.primaryMd },
   nextText: { color: '#fff', fontWeight: '700', fontSize: 16 },
 });

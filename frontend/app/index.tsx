@@ -3,7 +3,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Feather } from '@expo/vector-icons';
-import { colors, spacing, radii } from '../src/theme';
+import { colors, spacing, radii, shadows } from '../src/theme';
 import { useI18n } from '../src/i18n/I18nProvider';
 
 export default function Welcome() {
@@ -66,7 +66,7 @@ const styles = StyleSheet.create({
   safe: { flex: 1, justifyContent: 'space-between', paddingHorizontal: spacing.lg },
   top: { paddingTop: spacing.md },
   logoRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-  logoDot: { width: 12, height: 12, borderRadius: 6, backgroundColor: colors.primary, shadowColor: colors.primary, shadowOpacity: 0.8, shadowRadius: 8 },
+  logoDot: { width: 12, height: 12, borderRadius: 6, backgroundColor: colors.primary, boxShadow: shadows.primaryGlow },
   logoText: { color: colors.textPrimary, fontSize: 16, fontWeight: '700', letterSpacing: 0.3 },
   bottom: { paddingBottom: spacing.lg, gap: spacing.md },
   eyebrow: { color: colors.primary, fontSize: 11, fontWeight: '700', letterSpacing: 2 },
@@ -80,10 +80,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: spacing.sm,
-    shadowColor: colors.primary,
-    shadowOpacity: 0.5,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 6 },
+    boxShadow: shadows.primaryLg,
     elevation: 8,
   },
   primaryBtnText: { color: '#fff', fontSize: 17, fontWeight: '700' },

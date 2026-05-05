@@ -3,7 +3,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
-import { colors, spacing, radii } from '../../src/theme';
+import { colors, spacing, radii, shadows } from '../../src/theme';
 import { useAuth } from '../../src/AuthContext';
 import { api } from '../../src/api';
 import { useState } from 'react';
@@ -118,7 +118,7 @@ const styles = StyleSheet.create({
   planBadge: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: colors.surfaceElev, paddingVertical: 6, paddingHorizontal: 12, borderRadius: radii.full, marginTop: spacing.md },
   planBadgePro: { backgroundColor: colors.primary },
   planText: { color: colors.textSecondary, fontSize: 11, fontWeight: '700', letterSpacing: 1 },
-  upgradeCard: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, backgroundColor: colors.primary, borderRadius: radii.lg, padding: spacing.md, marginBottom: spacing.xl, shadowColor: colors.primary, shadowOpacity: 0.5, shadowRadius: 14 },
+  upgradeCard: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, backgroundColor: colors.primary, borderRadius: radii.lg, padding: spacing.md, marginBottom: spacing.xl, boxShadow: shadows.primaryMd },
   upgradeEyebrow: { color: 'rgba(255,255,255,0.8)', fontSize: 10, fontWeight: '700', letterSpacing: 2 },
   upgradeTitle: { color: '#fff', fontSize: 16, fontWeight: '700', marginTop: 4 },
   upgradeSub: { color: 'rgba(255,255,255,0.8)', fontSize: 13, marginTop: 2 },

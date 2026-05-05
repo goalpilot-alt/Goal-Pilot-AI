@@ -3,7 +3,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import { Feather } from '@expo/vector-icons';
-import { colors, spacing, radii } from '../../src/theme';
+import { colors, spacing, radii, shadows } from '../../src/theme';
 import { api } from '../../src/api';
 import { useAuth } from '../../src/AuthContext';
 import { useI18n } from '../../src/i18n/I18nProvider';
@@ -86,6 +86,6 @@ const styles = StyleSheet.create({
   errIcon: { width: 80, height: 80, borderRadius: 40, backgroundColor: 'rgba(245,158,11,0.15)', alignItems: 'center', justifyContent: 'center', marginBottom: spacing.sm },
   title: { color: colors.textPrimary, fontSize: 26, fontWeight: '800', textAlign: 'center', letterSpacing: -0.5 },
   sub: { color: colors.textSecondary, fontSize: 15, textAlign: 'center', lineHeight: 22, maxWidth: 320 },
-  cta: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: colors.primary, paddingVertical: 14, paddingHorizontal: 28, borderRadius: radii.full, marginTop: spacing.md, shadowColor: colors.primary, shadowOpacity: 0.5, shadowRadius: 12 },
+  cta: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: colors.primary, paddingVertical: 14, paddingHorizontal: 28, borderRadius: radii.full, marginTop: spacing.md, boxShadow: shadows.primaryMd },
   ctaText: { color: '#fff', fontWeight: '700', fontSize: 15 },
 });

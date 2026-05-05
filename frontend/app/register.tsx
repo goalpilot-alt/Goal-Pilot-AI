@@ -3,7 +3,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, Link } from 'expo-router';
 import { useState } from 'react';
 import { Feather } from '@expo/vector-icons';
-import { colors, spacing, radii } from '../src/theme';
+import { colors, spacing, radii, shadows } from '../src/theme';
 import { useAuth } from '../src/AuthContext';
 import { useI18n } from '../src/i18n/I18nProvider';
 
@@ -81,7 +81,7 @@ const styles = StyleSheet.create({
   field: { marginBottom: spacing.md },
   label: { color: colors.textSecondary, fontSize: 12, fontWeight: '600', marginBottom: 6, letterSpacing: 0.5, textTransform: 'uppercase' },
   input: { backgroundColor: colors.surfaceElev, color: colors.textPrimary, borderRadius: radii.md, paddingHorizontal: 16, paddingVertical: 14, fontSize: 16, borderWidth: 1, borderColor: colors.border },
-  btn: { backgroundColor: colors.primary, paddingVertical: 16, borderRadius: radii.full, alignItems: 'center', marginTop: spacing.md, shadowColor: colors.primary, shadowOpacity: 0.5, shadowRadius: 14, shadowOffset: { width: 0, height: 4 } },
+  btn: { backgroundColor: colors.primary, paddingVertical: 16, borderRadius: radii.full, alignItems: 'center', marginTop: spacing.md, boxShadow: shadows.primaryMd },
   btnText: { color: '#fff', fontWeight: '700', fontSize: 16 },
   err: { color: colors.error, marginTop: spacing.xs },
   footer: { flexDirection: 'row', justifyContent: 'center', marginTop: spacing.xl },
