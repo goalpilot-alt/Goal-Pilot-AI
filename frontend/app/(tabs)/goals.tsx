@@ -5,11 +5,13 @@ import { useCallback, useState } from 'react';
 import { Feather } from '@expo/vector-icons';
 import { colors, spacing, radii } from '../../src/theme';
 import { api } from '../../src/api';
+import { useI18n } from '../../src/i18n/I18nProvider';
 
 type Goal = { id: string; title: string; deadline: string; status: string; plan?: any };
 
 export default function Goals() {
   const router = useRouter();
+  const { t } = useI18n();
   const [goals, setGoals] = useState<Goal[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -29,7 +31,7 @@ export default function Goals() {
     <SafeAreaView style={styles.root} edges={['top']}>
       <ScrollView contentContainerStyle={styles.scroll}>
         <View style={styles.header}>
-          <Text style={styles.title}>Your Goals</Text>
+          <Text style={styles.title}>{t('your_goals')}</Text>
           <TouchableOpacity style={styles.addBtn} onPress={() => router.push('/goal/new')} testID="goals-new-btn">
             <Feather name="plus" size={20} color="#fff" />
           </TouchableOpacity>
@@ -38,10 +40,10 @@ export default function Goals() {
         {goals.length === 0 ? (
           <View style={styles.empty} testID="goals-empty">
             <Feather name="flag" size={40} color={colors.textTertiary} />
-            <Text style={styles.emptyTitle}>No goals yet</Text>
-            <Text style={styles.emptySub}>Turn your next ambition into an AI-powered plan.</Text>
+            <Text style={styles.emptyTitle}>{t('no_goals_yet')}</Text>
+            <Text style={styles.emptySub}>{t('no_goals_sub')}</Text>
             <TouchableOpacity style={styles.emptyBtn} onPress={() => router.push('/goal/new')}>
-              <Text style={styles.emptyBtnText}>Create a goal</Text>
+              <Text style={styles.emptyBtnText}>{t('create_a_goal')}</Text>
             </TouchableOpacity>
           </View>
         ) : goals.map(g => (
@@ -61,9 +63,9 @@ export default function Goals() {
             <Text style={styles.cardTitle}>{g.title}</Text>
             <View style={styles.cardMeta}>
               <Feather name="calendar" size={13} color={colors.textTertiary} />
-              <Text style={styles.cardMetaText}>Due {g.deadline}</Text>
+              <Text style={styles.cardMetaText}>{t('due', { date: g.deadline })}</Text>
               {g.plan?.milestones ? (
-                <Text style={styles.cardMetaText}>• {g.plan.milestones.length} milestones</Text>
+                <Text style={styles.cardMetaText}>• {t('milestones_count', { n: g.plan.milestones.length })}</Text>
               ) : null}
             </View>
           </TouchableOpacity>

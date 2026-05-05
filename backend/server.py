@@ -36,6 +36,7 @@ JWT_SECRET = os.environ['JWT_SECRET']
 JWT_ALGO = "HS256"
 EMERGENT_LLM_KEY = os.environ['EMERGENT_LLM_KEY']
 STRIPE_API_KEY = os.environ['STRIPE_API_KEY']
+STRIPE_WEBHOOK_SECRET = os.environ.get('STRIPE_WEBHOOK_SECRET', '')
 
 # Server-side plan catalog — NEVER trust amounts from client
 PACKAGES = {
@@ -132,6 +133,35 @@ class PushTokenReq(BaseModel):
     platform: Optional[str] = None  # 'ios' | 'android' | 'web'
 
 
+class LocaleReq(BaseModel):
+    locale: str
+
+
+SUPPORTED_LOCALES = {"en-US", "en-GB", "es", "fr", "cs", "sk", "ru", "zh-CN"}
+
+# Friendly names for the AI prompts so it knows what language to respond in
+LOCALE_LANGUAGE_NAMES = {
+    "en-US": "English (US)",
+    "en-GB": "English (UK)",
+    "es":    "Spanish (Español)",
+    "fr":    "French (Français)",
+    "cs":    "Czech (Čeština)",
+    "sk":    "Slovak (Slovenčina)",
+    "ru":    "Russian (Русский)",
+    "zh-CN": "Simplified Chinese (中文 简体)",
+}
+
+
+async def get_user_locale(user: dict) -> str:
+    loc = user.get("locale") or "en-US"
+    return loc if loc in SUPPORTED_LOCALES else "en-US"
+
+
+def lang_instruction(locale: str) -> str:
+    name = LOCALE_LANGUAGE_NAMES.get(locale, "English (US)")
+    return f"Respond entirely in {name}. All field values in the JSON must be written in {name}."
+
+
 # ---------- Auth Endpoints ----------
 @api.post("/auth/register", response_model=AuthResp)
 async def register(req: RegisterReq):
@@ -170,13 +200,22 @@ async def me(user: dict = Depends(get_current_user)):
     return user
 
 
+@api.post("/auth/locale")
+async def set_locale(req: LocaleReq, user: dict = Depends(get_current_user)):
+    if req.locale not in SUPPORTED_LOCALES:
+        raise HTTPException(status_code=400, detail="Unsupported locale")
+    await db.users.update_one({"id": user["id"]}, {"$set": {"locale": req.locale}})
+    return {"ok": True, "locale": req.locale}
+
+
 # ---------- AI Plan Generation ----------
-async def generate_ai_plan(goal: dict) -> dict:
+async def generate_ai_plan(goal: dict, locale: str = "en-US") -> dict:
     session_id = f"goal-{goal['id']}"
     system_msg = (
         "You are GoalPilot AI, an expert coach and planner. "
         "You receive a user goal and produce a structured JSON plan. "
-        "Be specific, motivating and realistic. Return ONLY valid JSON, no markdown."
+        "Be specific, motivating and realistic. Return ONLY valid JSON, no markdown. "
+        + lang_instruction(locale)
     )
     chat = LlmChat(
         api_key=EMERGENT_LLM_KEY,
@@ -265,7 +304,7 @@ async def create_goal(req: GoalCreateReq, user: dict = Depends(get_current_user)
 
     # Generate AI plan
     try:
-        ai_plan = await generate_ai_plan(goal_doc)
+        ai_plan = await generate_ai_plan(goal_doc, await get_user_locale(user))
         goal_doc["plan"] = ai_plan
     except Exception as e:
         logger.error(f"AI generation failed: {e}")
@@ -429,7 +468,7 @@ async def weekly_review(user: dict = Depends(get_current_user)):
         chat = LlmChat(
             api_key=EMERGENT_LLM_KEY,
             session_id=f"review-{user['id']}-{today_s}",
-            system_message="You are an AI accountability coach. Be warm, specific, motivating. Return ONLY JSON.",
+            system_message="You are an AI accountability coach. Be warm, specific, motivating. Return ONLY JSON. " + lang_instruction(await get_user_locale(user)),
         ).with_model("anthropic", "claude-sonnet-4-5-20250929")
         prompt = f"""User progress last 7 days:
 - Tasks completed: {completed}
@@ -574,26 +613,50 @@ async def get_checkout_status(session_id: str, user: dict = Depends(get_current_
 
 @api.post("/webhook/stripe")
 async def stripe_webhook(request: Request):
+    """Stripe webhook endpoint to confirm payment & upgrade plan asynchronously.
+
+    Validated using STRIPE_WEBHOOK_SECRET when present. Idempotent — safe to retry.
+    """
     body = await request.body()
     signature = request.headers.get("Stripe-Signature", "")
-    checkout = StripeCheckout(api_key=STRIPE_API_KEY, webhook_url="")
+    checkout = StripeCheckout(api_key=STRIPE_API_KEY, webhook_secret=STRIPE_WEBHOOK_SECRET or None)
     try:
         event = await checkout.handle_webhook(body, signature)
     except Exception as e:
-        logger.error(f"Stripe webhook error: {e}")
+        logger.error(f"Stripe webhook validation error: {e}")
         raise HTTPException(status_code=400, detail="Invalid webhook")
+
+    event_type = getattr(event, "event_type", None) or getattr(event, "type", None)
+    logger.info(f"Stripe webhook received: type={event_type} session={event.session_id} status={event.payment_status}")
 
     if event.payment_status == "paid" and event.session_id:
         tx = await db.payment_transactions.find_one({"session_id": event.session_id})
-        if tx and tx.get("payment_status") != "paid":
-            await db.payment_transactions.update_one(
-                {"session_id": event.session_id},
-                {"$set": {"payment_status": "paid", "status": "complete", "updated_at": datetime.now(timezone.utc).isoformat()}},
-            )
-            await db.users.update_one(
-                {"id": tx["user_id"]},
-                {"$set": {"plan": tx["plan"], "billing": tx["billing"], "upgraded_at": datetime.now(timezone.utc).isoformat()}},
-            )
+        if not tx:
+            logger.warning(f"Webhook paid for unknown session_id={event.session_id}")
+            return {"ok": True, "ignored": True}
+        if tx.get("payment_status") == "paid":
+            # Already processed — idempotent no-op
+            return {"ok": True, "already_processed": True}
+
+        await db.payment_transactions.update_one(
+            {"session_id": event.session_id},
+            {"$set": {
+                "payment_status": "paid",
+                "status": "complete",
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+                "webhook_event_type": event_type,
+            }},
+        )
+        await db.users.update_one(
+            {"id": tx["user_id"]},
+            {"$set": {
+                "plan": tx["plan"],
+                "billing": tx["billing"],
+                "upgraded_at": datetime.now(timezone.utc).isoformat(),
+            }},
+        )
+        logger.info(f"User {tx['user_id']} upgraded via webhook to {tx['plan']}/{tx['billing']}")
+
     return {"ok": True}
 
 
@@ -615,7 +678,6 @@ async def upgrade(plan: str, billing: str = "monthly", user: dict = Depends(get_
 @api.get("/nudge")
 async def get_nudge(user: dict = Depends(get_current_user)):
     today = datetime.now(timezone.utc).date()
-    today_s = today.isoformat()
 
     # Days since last completed task
     last = await db.tasks.find_one(

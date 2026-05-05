@@ -8,6 +8,7 @@ import { api } from '../../src/api';
 import { useAuth } from '../../src/AuthContext';
 import ProgressRing from '../../src/ProgressRing';
 import { scheduleTaskReminders, getAndRegisterPushToken } from '../../src/notifications';
+import { useI18n } from '../../src/i18n/I18nProvider';
 
 type Task = { id: string; title: string; priority: string; est_minutes: number; completed: boolean; goal_id: string; due_date: string };
 type Stats = { today_total: number; today_done: number; today_pct: number; active_goals: number; total_completed: number; missed: number; streak: number };
@@ -16,6 +17,7 @@ type Nudge = { show: boolean; title?: string; message?: string; days_since?: num
 export default function Dashboard() {
   const router = useRouter();
   const { user } = useAuth();
+  const { t, locale } = useI18n();
   const [stats, setStats] = useState<Stats | null>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [missed, setMissed] = useState<Task[]>([]);
@@ -25,19 +27,18 @@ export default function Dashboard() {
 
   async function load() {
     try {
-      const [s, t, m, n] = await Promise.all([
+      const [s, tr, m, n] = await Promise.all([
         api.get('/dashboard/stats'),
         api.get('/tasks'),
         api.get('/tasks/missed'),
         api.get('/nudge'),
       ]);
       setStats(s.data);
-      const all = t.data as Task[];
+      const all = tr.data as Task[];
       const today = new Date().toISOString().slice(0, 10);
       setTasks(all.filter((x) => x.due_date === today));
       setMissed(m.data);
       setNudge(n.data);
-      // Fire and forget — schedule local reminders + register push token
       scheduleTaskReminders(all as any);
       getAndRegisterPushToken();
     } catch (e) { console.log('load err', e); }
@@ -71,8 +72,8 @@ export default function Dashboard() {
   }
 
   const hour = new Date().getHours();
-  const greeting = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
-  const today = new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' });
+  const greeting = hour < 12 ? t('good_morning') : hour < 18 ? t('good_afternoon') : t('good_evening');
+  const today = new Date().toLocaleDateString(locale, { weekday: 'long', month: 'short', day: 'numeric' });
 
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
@@ -83,7 +84,7 @@ export default function Dashboard() {
         <View style={styles.header}>
           <View>
             <Text style={styles.date}>{today}</Text>
-            <Text style={styles.greeting} testID="dashboard-greeting">{greeting}, {user?.name?.split(' ')[0] || 'there'}</Text>
+            <Text style={styles.greeting} testID="dashboard-greeting">{greeting}, {user?.name?.split(' ')[0] || ''}</Text>
           </View>
           <TouchableOpacity style={styles.addBtn} onPress={() => router.push('/goal/new')} testID="dashboard-new-goal-btn">
             <Feather name="plus" size={20} color="#fff" />
@@ -92,57 +93,65 @@ export default function Dashboard() {
 
         <View style={styles.statsRow}>
           <View style={styles.ringCard}>
-            <ProgressRing percent={stats?.today_pct ?? 0} label={`${stats?.today_done ?? 0}/${stats?.today_total ?? 0} today`} />
+            <ProgressRing percent={stats?.today_pct ?? 0} label={t('done_today', { done: stats?.today_done ?? 0, total: stats?.today_total ?? 0 })} />
           </View>
           <View style={styles.statsCol}>
             <View style={styles.statCard}>
               <Feather name="zap" size={18} color={colors.primary} />
               <Text style={styles.statValue} testID="dashboard-streak">{stats?.streak ?? 0}</Text>
-              <Text style={styles.statLabel}>Day streak</Text>
+              <Text style={styles.statLabel}>{t('day_streak')}</Text>
             </View>
             <View style={styles.statCard}>
               <Feather name="target" size={18} color={colors.secondary} />
               <Text style={styles.statValue}>{stats?.active_goals ?? 0}</Text>
-              <Text style={styles.statLabel}>Active goals</Text>
+              <Text style={styles.statLabel}>{t('active_goals')}</Text>
             </View>
           </View>
         </View>
 
-        {nudge?.show ? (
+        {nudge?.show ? (() => {
+          const d = nudge.days_since;
+          let nudgeTitle: string; let nudgeMsg: string;
+          if (d === null || d === undefined) { nudgeTitle = t('nudge_start_title'); nudgeMsg = t('nudge_start_msg'); }
+          else if (d === 1) { nudgeTitle = t('nudge_day1_title'); nudgeMsg = t('nudge_day1_msg'); }
+          else if (d <= 3) { nudgeTitle = t('nudge_days_title', { n: d }); nudgeMsg = t('nudge_days_msg'); }
+          else { nudgeTitle = t('nudge_restart_title'); nudgeMsg = t('nudge_restart_msg', { n: d }); }
+          return (
           <View style={styles.nudgeCard} testID="nudge-card">
             <View style={styles.nudgeRow}>
               <Feather name="life-buoy" size={18} color={colors.secondary} />
-              <Text style={styles.nudgeTitle}>{nudge.title}</Text>
+              <Text style={styles.nudgeTitle}>{nudgeTitle}</Text>
             </View>
-            <Text style={styles.nudgeMsg}>{nudge.message}</Text>
+            <Text style={styles.nudgeMsg}>{nudgeMsg}</Text>
             {nudge.suggested_task ? (
               <TouchableOpacity testID="nudge-quick-win" style={styles.nudgeBtn} onPress={doQuickWin}>
                 <Feather name="zap" size={14} color={colors.bg} />
-                <Text style={styles.nudgeBtnText}>Do this one: {nudge.suggested_task.title}</Text>
+                <Text style={styles.nudgeBtnText}>{t('do_this_one', { title: nudge.suggested_task.title })}</Text>
               </TouchableOpacity>
             ) : null}
           </View>
-        ) : null}
+          );
+        })() : null}
 
         {(missed && missed.length > 0) ? (
           <View style={styles.alertCard}>
             <View style={styles.alertRow}>
               <Feather name="alert-circle" size={18} color={colors.warning} />
-              <Text style={styles.alertTitle}>{missed.length} missed task{missed.length > 1 ? 's' : ''}</Text>
+              <Text style={styles.alertTitle}>{missed.length === 1 ? t('missed_tasks', { n: missed.length }) : t('missed_tasks_plural', { n: missed.length })}</Text>
             </View>
-            <Text style={styles.alertSub}>Tap a task below to catch up, or we&apos;ll adapt your plan next week.</Text>
+            <Text style={styles.alertSub}>{t('missed_sub')}</Text>
           </View>
         ) : null}
 
-        <Text style={styles.sectionTitle}>Today&apos;s Action Plan</Text>
+        <Text style={styles.sectionTitle}>{t('todays_plan')}</Text>
 
         {tasks.length === 0 ? (
           <View style={styles.emptyCard} testID="dashboard-empty">
             <Feather name="coffee" size={32} color={colors.textTertiary} />
-            <Text style={styles.emptyTitle}>No tasks for today</Text>
-            <Text style={styles.emptySub}>Create a goal and let GoalPilot AI generate your daily plan.</Text>
+            <Text style={styles.emptyTitle}>{t('no_tasks_today')}</Text>
+            <Text style={styles.emptySub}>{t('no_tasks_sub')}</Text>
             <TouchableOpacity style={styles.emptyBtn} onPress={() => router.push('/goal/new')} testID="dashboard-create-goal-btn">
-              <Text style={styles.emptyBtnText}>Create your first goal</Text>
+              <Text style={styles.emptyBtnText}>{t('create_first_goal')}</Text>
             </TouchableOpacity>
           </View>
         ) : tasks.map(task => (
@@ -178,7 +187,7 @@ export default function Dashboard() {
             <View style={styles.checkbox} />
             <View style={{ flex: 1 }}>
               <Text style={styles.taskTitle}>{task.title}</Text>
-              <Text style={styles.missedLabel}>Missed • {task.due_date}</Text>
+              <Text style={styles.missedLabel}>{t('missed_label')} • {task.due_date}</Text>
             </View>
           </TouchableOpacity>
         ))}

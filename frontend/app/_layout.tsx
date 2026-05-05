@@ -1,5 +1,6 @@
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { AuthProvider, useAuth } from '../src/AuthContext';
+import { I18nProvider, useI18n } from '../src/i18n/I18nProvider';
 import { useEffect } from 'react';
 import { View, ActivityIndicator, StyleSheet } from 'react-native';
 import { colors } from '../src/theme';
@@ -7,6 +8,7 @@ import { StatusBar } from 'expo-status-bar';
 
 function RootNav() {
   const { user, loading } = useAuth();
+  const { ready: i18nReady } = useI18n();
   const segments = useSegments();
   const router = useRouter();
 
@@ -20,7 +22,7 @@ function RootNav() {
     }
   }, [user, loading, segments]);
 
-  if (loading) {
+  if (loading || !i18nReady) {
     return (
       <View style={styles.loader}>
         <ActivityIndicator color={colors.primary} size="large" />
@@ -38,16 +40,19 @@ function RootNav() {
       <Stack.Screen name="goal/[id]" />
       <Stack.Screen name="pricing" options={{ presentation: 'modal' }} />
       <Stack.Screen name="payment/success" />
+      <Stack.Screen name="settings/language" options={{ presentation: 'modal' }} />
     </Stack>
   );
 }
 
 export default function RootLayout() {
   return (
-    <AuthProvider>
-      <StatusBar style="light" />
-      <RootNav />
-    </AuthProvider>
+    <I18nProvider>
+      <AuthProvider>
+        <StatusBar style="light" />
+        <RootNav />
+      </AuthProvider>
+    </I18nProvider>
   );
 }
 

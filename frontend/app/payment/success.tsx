@@ -6,11 +6,13 @@ import { Feather } from '@expo/vector-icons';
 import { colors, spacing, radii } from '../../src/theme';
 import { api } from '../../src/api';
 import { useAuth } from '../../src/AuthContext';
+import { useI18n } from '../../src/i18n/I18nProvider';
 
 type Status = 'polling' | 'paid' | 'expired' | 'error' | 'pending';
 
 export default function PaymentSuccess() {
   const router = useRouter();
+  const { t } = useI18n();
   const { session_id } = useLocalSearchParams<{ session_id?: string }>();
   const { refreshUser } = useAuth();
   const [status, setStatus] = useState<Status>('polling');
@@ -34,9 +36,7 @@ export default function PaymentSuccess() {
           }
           if (data.status === 'expired') { setStatus('expired'); return; }
           setStatus('pending');
-        } catch {
-          // keep polling
-        }
+        } catch {}
         await new Promise(r => setTimeout(r, 2000));
       }
       if (!cancelled.current) setStatus('error');
@@ -51,30 +51,26 @@ export default function PaymentSuccess() {
         {status === 'polling' || status === 'pending' ? (
           <>
             <ActivityIndicator color={colors.primary} size="large" />
-            <Text style={styles.title}>Confirming your payment…</Text>
-            <Text style={styles.sub}>This usually takes a few seconds.</Text>
+            <Text style={styles.title}>{t('confirming_payment')}</Text>
+            <Text style={styles.sub}>{t('takes_seconds')}</Text>
           </>
         ) : status === 'paid' ? (
           <>
             <View style={styles.successIcon}><Feather name="check" size={36} color="#fff" /></View>
-            <Text style={styles.title} testID="payment-success-title">You&apos;re upgraded!</Text>
-            <Text style={styles.sub}>
-              Welcome to {(info.plan || '').toUpperCase()} ({info.billing}). Time to crush your goals.
-            </Text>
+            <Text style={styles.title} testID="payment-success-title">{t('youre_upgraded')}</Text>
+            <Text style={styles.sub}>{t('welcome_to_plan_long', { plan: (info.plan || '').toUpperCase(), billing: info.billing || '' })}</Text>
             <TouchableOpacity testID="payment-success-cta" style={styles.cta} onPress={() => router.replace('/(tabs)/dashboard')}>
-              <Text style={styles.ctaText}>Go to Dashboard</Text>
+              <Text style={styles.ctaText}>{t('go_to_dashboard')}</Text>
               <Feather name="arrow-right" size={18} color="#fff" />
             </TouchableOpacity>
           </>
         ) : (
           <>
             <View style={styles.errIcon}><Feather name="alert-triangle" size={32} color={colors.warning} /></View>
-            <Text style={styles.title}>Payment {status === 'expired' ? 'expired' : 'check failed'}</Text>
-            <Text style={styles.sub}>
-              {status === 'expired' ? 'Your checkout session expired. Please try again.' : 'We couldn\u2019t confirm your payment. If you were charged, the upgrade will reflect shortly.'}
-            </Text>
+            <Text style={styles.title}>{status === 'expired' ? t('payment_expired') : t('payment_check_failed')}</Text>
+            <Text style={styles.sub}>{status === 'expired' ? t('session_expired_msg') : ''}</Text>
             <TouchableOpacity style={styles.cta} onPress={() => router.replace('/pricing')}>
-              <Text style={styles.ctaText}>Back to pricing</Text>
+              <Text style={styles.ctaText}>{t('back_to_pricing')}</Text>
             </TouchableOpacity>
           </>
         )}

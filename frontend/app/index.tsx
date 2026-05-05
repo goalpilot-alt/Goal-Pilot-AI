@@ -4,9 +4,11 @@ import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Feather } from '@expo/vector-icons';
 import { colors, spacing, radii } from '../src/theme';
+import { useI18n } from '../src/i18n/I18nProvider';
 
 export default function Welcome() {
   const router = useRouter();
+  const { t } = useI18n();
 
   return (
     <View style={styles.root}>
@@ -29,11 +31,9 @@ export default function Welcome() {
           </View>
 
           <View style={styles.bottom}>
-            <Text style={styles.eyebrow} testID="welcome-eyebrow">YOUR AI ACCOUNTABILITY PARTNER</Text>
-            <Text style={styles.title}>Turn ambition{"\n"}into action.</Text>
-            <Text style={styles.subtitle}>
-              Any goal. Any deadline. We&apos;ll break it into daily steps, keep you on track, and adapt as you go.
-            </Text>
+            <Text style={styles.eyebrow} testID="welcome-eyebrow">{t('welcome_eyebrow')}</Text>
+            <Text style={styles.title}>{t('welcome_title')}</Text>
+            <Text style={styles.subtitle}>{t('welcome_subtitle')}</Text>
 
             <TouchableOpacity
               testID="welcome-get-started-btn"
@@ -41,7 +41,7 @@ export default function Welcome() {
               activeOpacity={0.85}
               onPress={() => router.push('/register')}
             >
-              <Text style={styles.primaryBtnText}>Get Started</Text>
+              <Text style={styles.primaryBtnText}>{t('get_started')}</Text>
               <Feather name="arrow-right" size={20} color="#fff" />
             </TouchableOpacity>
 
@@ -51,7 +51,7 @@ export default function Welcome() {
               activeOpacity={0.8}
               onPress={() => router.push('/login')}
             >
-              <Text style={styles.secondaryBtnText}>I already have an account</Text>
+              <Text style={styles.secondaryBtnText}>{t('have_account')}</Text>
             </TouchableOpacity>
           </View>
         </SafeAreaView>

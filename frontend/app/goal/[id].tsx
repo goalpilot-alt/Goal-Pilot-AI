@@ -5,10 +5,12 @@ import { useEffect, useState } from 'react';
 import { Feather } from '@expo/vector-icons';
 import { colors, spacing, radii } from '../../src/theme';
 import { api } from '../../src/api';
+import { useI18n } from '../../src/i18n/I18nProvider';
 
 export default function GoalDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
+  const { t } = useI18n();
   const [goal, setGoal] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
@@ -22,10 +24,10 @@ export default function GoalDetail() {
   useEffect(() => { load(); }, [id]);
 
   async function onDelete() {
-    Alert.alert('Delete goal', 'This removes the goal and all its tasks.', [
-      { text: 'Cancel', style: 'cancel' },
+    Alert.alert(t('delete_goal'), t('delete_confirm'), [
+      { text: t('cancel'), style: 'cancel' },
       {
-        text: 'Delete', style: 'destructive', onPress: async () => {
+        text: t('delete'), style: 'destructive', onPress: async () => {
           await api.delete(`/goals/${id}`);
           router.replace('/(tabs)/goals');
         },
@@ -52,11 +54,11 @@ export default function GoalDetail() {
           </TouchableOpacity>
         </View>
 
-        <Text style={styles.eyebrow}>GOAL</Text>
+        <Text style={styles.eyebrow}>{t('goal')}</Text>
         <Text style={styles.title} testID="goal-title">{goal.title}</Text>
         <View style={styles.metaRow}>
           <Feather name="calendar" size={13} color={colors.textTertiary} />
-          <Text style={styles.meta}>Due {goal.deadline}</Text>
+          <Text style={styles.meta}>{t('due', { date: goal.deadline })}</Text>
           <Text style={styles.meta}>• {goal.hours_per_week}h/wk</Text>
           <Text style={styles.meta}>• {goal.current_level}</Text>
         </View>
@@ -65,7 +67,7 @@ export default function GoalDetail() {
           <View style={styles.aiCard} testID="goal-ai-summary">
             <View style={styles.aiRow}>
               <Feather name="cpu" size={14} color={colors.secondary} />
-              <Text style={styles.aiLabel}>AI SUMMARY</Text>
+              <Text style={styles.aiLabel}>{t('ai_summary')}</Text>
             </View>
             <Text style={styles.aiText}>{plan.summary}</Text>
           </View>
@@ -75,15 +77,15 @@ export default function GoalDetail() {
           <View style={[styles.aiCard, { borderColor: 'rgba(0,240,255,0.3)' }]}>
             <View style={styles.aiRow}>
               <Feather name="zap" size={14} color={colors.secondary} />
-              <Text style={styles.aiLabel}>WHY THIS WORKS</Text>
+              <Text style={styles.aiLabel}>{t('why_this_works')}</Text>
             </View>
             <Text style={styles.aiText}>{plan.why_it_works}</Text>
           </View>
         ) : null}
 
-        <Text style={styles.section}>Milestones</Text>
+        <Text style={styles.section}>{t('milestones')}</Text>
         {milestones.length === 0 ? (
-          <Text style={styles.empty}>No milestones generated.</Text>
+          <Text style={styles.empty}>{t('no_milestones')}</Text>
         ) : milestones.map((m: any, i: number) => (
           <View key={i} style={styles.milestoneCard} testID={`milestone-${i}`}>
             <View style={styles.mlBullet}>
@@ -91,18 +93,18 @@ export default function GoalDetail() {
             </View>
             <View style={{ flex: 1 }}>
               <Text style={styles.mlTitle}>{m.title}</Text>
-              {m.target_date ? <Text style={styles.mlDate}>Target: {m.target_date}</Text> : null}
+              {m.target_date ? <Text style={styles.mlDate}>{t('target', { date: m.target_date })}</Text> : null}
               {m.description ? <Text style={styles.mlDesc}>{m.description}</Text> : null}
             </View>
           </View>
         ))}
 
-        <Text style={styles.section}>Weekly plan</Text>
+        <Text style={styles.section}>{t('weekly_plan')}</Text>
         {weekly.length === 0 ? (
-          <Text style={styles.empty}>No weekly plan generated.</Text>
+          <Text style={styles.empty}>{t('no_weekly')}</Text>
         ) : weekly.map((w: any, i: number) => (
           <View key={i} style={styles.weekCard} testID={`week-${i}`}>
-            <Text style={styles.weekNum}>WEEK {w.week}</Text>
+            <Text style={styles.weekNum}>{t('week_n', { n: w.week })}</Text>
             <Text style={styles.weekFocus}>{w.focus}</Text>
             {(w.goals || []).map((g: string, j: number) => (
               <View key={j} style={styles.weekGoalRow}>

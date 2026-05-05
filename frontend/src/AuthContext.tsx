@@ -1,7 +1,8 @@
 import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import { api, setToken, clearToken, getToken } from './api';
+import { i18n } from './i18n';
 
-type User = { id: string; email: string; name: string; plan: string } | null;
+type User = { id: string; email: string; name: string; plan: string; locale?: string } | null;
 
 type AuthState = {
   user: User;
@@ -14,6 +15,10 @@ type AuthState = {
 
 const Ctx = createContext<AuthState | null>(null);
 
+async function syncLocaleToBackend() {
+  try { await api.post('/auth/locale', { locale: i18n.locale }); } catch {}
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User>(null);
   const [loading, setLoading] = useState(true);
@@ -24,6 +29,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const { data } = await api.get('/auth/me');
       setUser(data);
+      // ensure backend knows current locale (used by AI prompts + nudge messages)
+      syncLocaleToBackend();
     } catch {
       await clearToken();
     } finally {
@@ -37,12 +44,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const { data } = await api.post('/auth/login', { email, password });
     await setToken(data.token);
     setUser(data.user);
+    syncLocaleToBackend();
   }
 
   async function register(email: string, password: string, name: string) {
     const { data } = await api.post('/auth/register', { email, password, name });
     await setToken(data.token);
     setUser(data.user);
+    syncLocaleToBackend();
   }
 
   async function logout() {

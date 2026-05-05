@@ -5,10 +5,12 @@ import { useFocusEffect } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import { colors, spacing, radii } from '../../src/theme';
 import { api } from '../../src/api';
+import { useI18n } from '../../src/i18n/I18nProvider';
 
 type Review = { completed: number; missed: number; total_due: number; completion_rate: number; summary: string; suggestion: string };
 
 export default function ReviewScreen() {
+  const { t } = useI18n();
   const [review, setReview] = useState<Review | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -26,36 +28,36 @@ export default function ReviewScreen() {
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
       <ScrollView contentContainerStyle={styles.scroll}>
-        <Text style={styles.eyebrow}>Last 7 days</Text>
-        <Text style={styles.title}>Weekly AI Review</Text>
-        <Text style={styles.subtitle}>Your coach&apos;s take on this week.</Text>
+        <Text style={styles.eyebrow}>{t('last_7_days')}</Text>
+        <Text style={styles.title}>{t('weekly_review')}</Text>
+        <Text style={styles.subtitle}>{t('review_subtitle')}</Text>
 
         {loading ? (
           <View style={styles.loaderBox}>
             <ActivityIndicator color={colors.primary} size="large" />
-            <Text style={styles.loaderText}>Generating insights…</Text>
+            <Text style={styles.loaderText}>{t('generating_insights')}</Text>
           </View>
         ) : review ? (
           <>
             <View style={styles.statsRow}>
               <View style={styles.statBox}>
                 <Text style={[styles.statNum, { color: colors.success }]}>{review.completed}</Text>
-                <Text style={styles.statLbl}>Completed</Text>
+                <Text style={styles.statLbl}>{t('completed')}</Text>
               </View>
               <View style={styles.statBox}>
                 <Text style={[styles.statNum, { color: colors.warning }]}>{review.missed}</Text>
-                <Text style={styles.statLbl}>Missed</Text>
+                <Text style={styles.statLbl}>{t('missed')}</Text>
               </View>
               <View style={styles.statBox}>
                 <Text style={[styles.statNum, { color: colors.secondary }]}>{review.completion_rate}%</Text>
-                <Text style={styles.statLbl}>Rate</Text>
+                <Text style={styles.statLbl}>{t('rate')}</Text>
               </View>
             </View>
 
             <View style={styles.aiCard} testID="review-summary-card">
               <View style={styles.aiRow}>
                 <Feather name="message-circle" size={16} color={colors.secondary} />
-                <Text style={styles.aiLabel}>COACH SUMMARY</Text>
+                <Text style={styles.aiLabel}>{t('coach_summary')}</Text>
               </View>
               <Text style={styles.aiText}>{review.summary}</Text>
             </View>
@@ -63,14 +65,14 @@ export default function ReviewScreen() {
             <View style={styles.aiCard}>
               <View style={styles.aiRow}>
                 <Feather name="compass" size={16} color={colors.primary} />
-                <Text style={styles.aiLabel}>NEXT WEEK&apos;S FOCUS</Text>
+                <Text style={styles.aiLabel}>{t('next_week_focus')}</Text>
               </View>
               <Text style={styles.aiText}>{review.suggestion}</Text>
             </View>
 
             <TouchableOpacity style={styles.refreshBtn} onPress={load} testID="review-refresh-btn">
               <Feather name="refresh-cw" size={16} color={colors.textPrimary} />
-              <Text style={styles.refreshText}>Regenerate review</Text>
+              <Text style={styles.refreshText}>{t('regenerate')}</Text>
             </TouchableOpacity>
           </>
         ) : null}

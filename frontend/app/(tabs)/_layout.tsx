@@ -2,8 +2,10 @@ import { Tabs } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import { colors } from '../../src/theme';
 import { Platform } from 'react-native';
+import { useI18n } from '../../src/i18n/I18nProvider';
 
 export default function TabsLayout() {
+  const { t } = useI18n();
   return (
     <Tabs
       screenOptions={{
@@ -23,19 +25,19 @@ export default function TabsLayout() {
     >
       <Tabs.Screen
         name="dashboard"
-        options={{ title: 'Today', tabBarIcon: ({ color, size }) => <Feather name="sun" color={color} size={size} /> }}
+        options={{ title: t('tab_today'), tabBarIcon: ({ color, size }) => <Feather name="sun" color={color} size={size} /> }}
       />
       <Tabs.Screen
         name="goals"
-        options={{ title: 'Goals', tabBarIcon: ({ color, size }) => <Feather name="target" color={color} size={size} /> }}
+        options={{ title: t('tab_goals'), tabBarIcon: ({ color, size }) => <Feather name="target" color={color} size={size} /> }}
       />
       <Tabs.Screen
         name="review"
-        options={{ title: 'Review', tabBarIcon: ({ color, size }) => <Feather name="bar-chart-2" color={color} size={size} /> }}
+        options={{ title: t('tab_review'), tabBarIcon: ({ color, size }) => <Feather name="bar-chart-2" color={color} size={size} /> }}
       />
       <Tabs.Screen
         name="profile"
-        options={{ title: 'Profile', tabBarIcon: ({ color, size }) => <Feather name="user" color={color} size={size} /> }}
+        options={{ title: t('tab_profile'), tabBarIcon: ({ color, size }) => <Feather name="user" color={color} size={size} /> }}
       />
     </Tabs>
   );

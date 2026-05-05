@@ -5,10 +5,12 @@ import { useState } from 'react';
 import { Feather } from '@expo/vector-icons';
 import { colors, spacing, radii } from '../src/theme';
 import { useAuth } from '../src/AuthContext';
+import { useI18n } from '../src/i18n/I18nProvider';
 
 export default function Register() {
   const router = useRouter();
   const { register } = useAuth();
+  const { t } = useI18n();
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -17,15 +19,15 @@ export default function Register() {
 
   async function onSubmit() {
     setErr('');
-    if (!name || !email || !password) return setErr('Please fill all fields');
-    if (password.length < 6) return setErr('Password must be at least 6 characters');
+    if (!name || !email || !password) return setErr(t('fill_all_fields'));
+    if (password.length < 6) return setErr(t('pw_too_short'));
     setLoading(true);
     try {
       await register(email.trim(), password, name.trim());
       router.replace('/(tabs)/dashboard');
     } catch (e: any) {
       const d = e?.response?.data?.detail;
-      setErr(typeof d === 'string' ? d : 'Sign up failed');
+      setErr(typeof d === 'string' ? d : t('signup_failed'));
     } finally { setLoading(false); }
   }
 
@@ -36,32 +38,32 @@ export default function Register() {
           <TouchableOpacity onPress={() => router.back()} style={styles.back} testID="register-back-btn">
             <Feather name="arrow-left" size={22} color={colors.textPrimary} />
           </TouchableOpacity>
-          <Text style={styles.title}>Create account</Text>
-          <Text style={styles.subtitle}>Start turning goals into action.</Text>
+          <Text style={styles.title}>{t('create_account')}</Text>
+          <Text style={styles.subtitle}>{t('register_subtitle')}</Text>
 
           <View style={styles.field}>
-            <Text style={styles.label}>Your name</Text>
+            <Text style={styles.label}>{t('your_name')}</Text>
             <TextInput testID="register-name-input" value={name} onChangeText={setName} placeholder="Jordan Chen" placeholderTextColor={colors.textTertiary} style={styles.input} />
           </View>
           <View style={styles.field}>
-            <Text style={styles.label}>Email</Text>
+            <Text style={styles.label}>{t('email')}</Text>
             <TextInput testID="register-email-input" value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" placeholder="you@goalpilot.ai" placeholderTextColor={colors.textTertiary} style={styles.input} />
           </View>
           <View style={styles.field}>
-            <Text style={styles.label}>Password</Text>
-            <TextInput testID="register-password-input" value={password} onChangeText={setPassword} secureTextEntry placeholder="At least 6 characters" placeholderTextColor={colors.textTertiary} style={styles.input} />
+            <Text style={styles.label}>{t('password')}</Text>
+            <TextInput testID="register-password-input" value={password} onChangeText={setPassword} secureTextEntry placeholder={t('pw_min_chars')} placeholderTextColor={colors.textTertiary} style={styles.input} />
           </View>
 
           {err ? <Text style={styles.err} testID="register-error">{err}</Text> : null}
 
           <TouchableOpacity testID="register-submit-btn" disabled={loading} style={[styles.btn, loading && { opacity: 0.6 }]} onPress={onSubmit}>
-            <Text style={styles.btnText}>{loading ? 'Creating account…' : 'Create account'}</Text>
+            <Text style={styles.btnText}>{loading ? t('creating_account') : t('create_account')}</Text>
           </TouchableOpacity>
 
           <View style={styles.footer}>
-            <Text style={styles.footerTxt}>Have an account? </Text>
+            <Text style={styles.footerTxt}>{t('have_account_q')}</Text>
             <Link href="/login" asChild>
-              <TouchableOpacity testID="register-go-login-btn"><Text style={styles.link}>Log in</Text></TouchableOpacity>
+              <TouchableOpacity testID="register-go-login-btn"><Text style={styles.link}>{t('log_in')}</Text></TouchableOpacity>
             </Link>
           </View>
         </ScrollView>

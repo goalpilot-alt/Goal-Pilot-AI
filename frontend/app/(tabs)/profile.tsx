@@ -7,15 +7,19 @@ import { colors, spacing, radii } from '../../src/theme';
 import { useAuth } from '../../src/AuthContext';
 import { api } from '../../src/api';
 import { useState } from 'react';
+import { useI18n } from '../../src/i18n/I18nProvider';
 
 const BACKEND = process.env.EXPO_PUBLIC_BACKEND_URL;
 
 export default function Profile() {
   const { user, logout } = useAuth();
   const router = useRouter();
+  const { t, locale, supported } = useI18n();
   const [syncing, setSyncing] = useState(false);
 
   const plan = user?.plan || 'free';
+  const planLabel = plan === 'free' ? t('free_plan') : plan === 'pro' ? t('pro_plan') : t('coach_plan');
+  const currentLangLabel = supported.find(s => s.code === locale)?.label || 'English (US)';
 
   async function syncCalendar() {
     setSyncing(true);
@@ -23,25 +27,23 @@ export default function Profile() {
       const { data } = await api.get('/calendar/url');
       const url = `${BACKEND}/api/calendar/export.ics?token=${data.token}`;
       if (Platform.OS === 'web') {
-        // On web, open in a new tab so user can download / subscribe
         window.open(url, '_blank');
       } else {
-        // Native: open the webcal: URL so OS offers to subscribe in calendar app
         const webcal = url.replace(/^https?:\/\//, 'webcal://');
         const supported = await Linking.canOpenURL(webcal);
         if (supported) await Linking.openURL(webcal);
         else await WebBrowser.openBrowserAsync(url);
       }
-      Alert.alert('Calendar sync', 'Your device calendar will now stay in sync with GoalPilot tasks & deadlines.');
+      Alert.alert(t('sync_calendar'), t('sync_calendar_done'));
     } catch {
-      Alert.alert('Oops', 'Could not prepare calendar sync.');
+      Alert.alert(t('oops'), t('could_not_calendar'));
     } finally { setSyncing(false); }
   }
 
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
       <ScrollView contentContainerStyle={styles.scroll}>
-        <Text style={styles.title}>Profile</Text>
+        <Text style={styles.title}>{t('profile')}</Text>
 
         <View style={styles.card}>
           <View style={styles.avatar}>
@@ -51,42 +53,51 @@ export default function Profile() {
           <Text style={styles.email}>{user?.email}</Text>
           <View style={[styles.planBadge, plan !== 'free' && styles.planBadgePro]}>
             <Feather name={plan === 'free' ? 'star' : 'zap'} size={12} color={plan === 'free' ? colors.textSecondary : '#fff'} />
-            <Text style={[styles.planText, plan !== 'free' && { color: '#fff' }]}>{plan.toUpperCase()} PLAN</Text>
+            <Text style={[styles.planText, plan !== 'free' && { color: '#fff' }]}>{planLabel}</Text>
           </View>
         </View>
 
         <TouchableOpacity style={styles.upgradeCard} onPress={() => router.push('/pricing')} testID="profile-upgrade-btn">
           <View style={{ flex: 1 }}>
-            <Text style={styles.upgradeEyebrow}>UPGRADE</Text>
-            <Text style={styles.upgradeTitle}>Save 25% with annual plans</Text>
-            <Text style={styles.upgradeSub}>Pro from $9/mo · Coach from $21/mo</Text>
+            <Text style={styles.upgradeEyebrow}>{t('upgrade')}</Text>
+            <Text style={styles.upgradeTitle}>{t('upgrade_title')}</Text>
+            <Text style={styles.upgradeSub}>{t('upgrade_sub')}</Text>
           </View>
           <Feather name="arrow-right" size={22} color="#fff" />
         </TouchableOpacity>
 
-        <Text style={styles.sectionTitle}>Settings</Text>
+        <Text style={styles.sectionTitle}>{t('settings')}</Text>
 
         <TouchableOpacity style={styles.row} onPress={syncCalendar} disabled={syncing} testID="profile-calendar-btn">
           <Feather name="calendar" size={18} color={colors.textPrimary} />
           <View style={{ flex: 1 }}>
-            <Text style={styles.rowText}>Sync to Calendar</Text>
-            <Text style={styles.rowSub}>Subscribe in Apple · Google · Outlook</Text>
+            <Text style={styles.rowText}>{t('sync_calendar')}</Text>
+            <Text style={styles.rowSub}>{t('sync_calendar_sub')}</Text>
           </View>
           <Feather name={syncing ? 'loader' : 'external-link'} size={16} color={colors.textTertiary} />
+        </TouchableOpacity>
+
+        <TouchableOpacity style={styles.row} onPress={() => router.push('/settings/language')} testID="profile-language-btn">
+          <Feather name="globe" size={18} color={colors.textPrimary} />
+          <View style={{ flex: 1 }}>
+            <Text style={styles.rowText}>{t('language')}</Text>
+            <Text style={styles.rowSub}>{currentLangLabel}</Text>
+          </View>
+          <Feather name="chevron-right" size={16} color={colors.textTertiary} />
         </TouchableOpacity>
 
         <View style={styles.row}>
           <Feather name="bell" size={18} color={colors.textPrimary} />
           <View style={{ flex: 1 }}>
-            <Text style={styles.rowText}>Smart reminders</Text>
-            <Text style={styles.rowSub}>Daily nudges & streak recovery</Text>
+            <Text style={styles.rowText}>{t('smart_reminders')}</Text>
+            <Text style={styles.rowSub}>{t('smart_reminders_sub')}</Text>
           </View>
           <View style={[styles.toggle, styles.toggleOn]}><View style={[styles.knob, styles.knobOn]} /></View>
         </View>
 
         <TouchableOpacity style={styles.logout} onPress={logout} testID="profile-logout-btn">
           <Feather name="log-out" size={16} color={colors.error} />
-          <Text style={styles.logoutText}>Log out</Text>
+          <Text style={styles.logoutText}>{t('log_out')}</Text>
         </TouchableOpacity>
 
         <Text style={styles.footer}>GoalPilot AI · v1.1</Text>

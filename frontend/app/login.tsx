@@ -1,14 +1,16 @@
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, KeyboardAvoidingView, Platform, ScrollView, Alert } from 'react-native';
+import { View, Text, StyleSheet, TextInput, TouchableOpacity, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, Link } from 'expo-router';
 import { useState } from 'react';
 import { Feather } from '@expo/vector-icons';
 import { colors, spacing, radii } from '../src/theme';
 import { useAuth } from '../src/AuthContext';
+import { useI18n } from '../src/i18n/I18nProvider';
 
 export default function Login() {
   const router = useRouter();
   const { login } = useAuth();
+  const { t } = useI18n();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -16,14 +18,14 @@ export default function Login() {
 
   async function onSubmit() {
     setErr('');
-    if (!email || !password) return setErr('Please fill all fields');
+    if (!email || !password) return setErr(t('fill_all_fields'));
     setLoading(true);
     try {
       await login(email.trim(), password);
       router.replace('/(tabs)/dashboard');
     } catch (e: any) {
       const d = e?.response?.data?.detail;
-      setErr(typeof d === 'string' ? d : 'Login failed');
+      setErr(typeof d === 'string' ? d : t('login_failed'));
     } finally {
       setLoading(false);
     }
@@ -36,11 +38,11 @@ export default function Login() {
           <TouchableOpacity onPress={() => router.back()} style={styles.back} testID="login-back-btn">
             <Feather name="arrow-left" size={22} color={colors.textPrimary} />
           </TouchableOpacity>
-          <Text style={styles.title}>Welcome back</Text>
-          <Text style={styles.subtitle}>Log in to keep the momentum going.</Text>
+          <Text style={styles.title}>{t('welcome_back')}</Text>
+          <Text style={styles.subtitle}>{t('login_subtitle')}</Text>
 
           <View style={styles.field}>
-            <Text style={styles.label}>Email</Text>
+            <Text style={styles.label}>{t('email')}</Text>
             <TextInput
               testID="login-email-input"
               value={email}
@@ -54,7 +56,7 @@ export default function Login() {
           </View>
 
           <View style={styles.field}>
-            <Text style={styles.label}>Password</Text>
+            <Text style={styles.label}>{t('password')}</Text>
             <TextInput
               testID="login-password-input"
               value={password}
@@ -69,13 +71,13 @@ export default function Login() {
           {err ? <Text style={styles.err} testID="login-error">{err}</Text> : null}
 
           <TouchableOpacity testID="login-submit-btn" disabled={loading} style={[styles.btn, loading && { opacity: 0.6 }]} onPress={onSubmit}>
-            <Text style={styles.btnText}>{loading ? 'Signing in…' : 'Log in'}</Text>
+            <Text style={styles.btnText}>{loading ? t('signing_in') : t('log_in')}</Text>
           </TouchableOpacity>
 
           <View style={styles.footer}>
-            <Text style={styles.footerTxt}>New here? </Text>
+            <Text style={styles.footerTxt}>{t('new_here')}</Text>
             <Link href="/register" asChild>
-              <TouchableOpacity testID="login-go-register-btn"><Text style={styles.link}>Create account</Text></TouchableOpacity>
+              <TouchableOpacity testID="login-go-register-btn"><Text style={styles.link}>{t('create_account')}</Text></TouchableOpacity>
             </Link>
           </View>
         </ScrollView>

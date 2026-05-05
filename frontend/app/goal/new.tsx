@@ -5,17 +5,13 @@ import { useState } from 'react';
 import { Feather } from '@expo/vector-icons';
 import { colors, spacing, radii } from '../../src/theme';
 import { api } from '../../src/api';
-
-const LEVELS = [
-  { key: 'beginner', label: 'Beginner', desc: 'Just starting out' },
-  { key: 'intermediate', label: 'Intermediate', desc: 'Some experience' },
-  { key: 'advanced', label: 'Advanced', desc: 'Pushing further' },
-];
+import { useI18n } from '../../src/i18n/I18nProvider';
 
 const HOURS = [3, 5, 10, 15, 20];
 
 export default function NewGoal() {
   const router = useRouter();
+  const { t } = useI18n();
   const [step, setStep] = useState(0);
   const [title, setTitle] = useState('');
   const [deadline, setDeadline] = useState('');
@@ -23,6 +19,12 @@ export default function NewGoal() {
   const [level, setLevel] = useState('beginner');
   const [hours, setHours] = useState(5);
   const [loading, setLoading] = useState(false);
+
+  const LEVELS = [
+    { key: 'beginner', label: t('level_beginner'), desc: t('level_beginner_desc') },
+    { key: 'intermediate', label: t('level_intermediate'), desc: t('level_intermediate_desc') },
+    { key: 'advanced', label: t('level_advanced'), desc: t('level_advanced_desc') },
+  ];
 
   function next() { setStep(s => Math.min(3, s + 1)); }
   function prev() { if (step === 0) router.back(); else setStep(s => s - 1); }
@@ -46,7 +48,7 @@ export default function NewGoal() {
       router.replace(`/goal/${data.id}`);
     } catch (e: any) {
       const d = e?.response?.data?.detail;
-      Alert.alert('Oops', typeof d === 'string' ? d : 'Could not create goal');
+      Alert.alert(t('oops'), typeof d === 'string' ? d : t('could_not_create_goal'));
     } finally { setLoading(false); }
   }
 
@@ -67,14 +69,14 @@ export default function NewGoal() {
         <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
           {step === 0 && (
             <>
-              <Text style={styles.eyebrow}>STEP 1 OF 4</Text>
-              <Text style={styles.qTitle}>What&apos;s your goal?</Text>
-              <Text style={styles.qSub}>Be specific. Our AI plans better with clarity.</Text>
+              <Text style={styles.eyebrow}>{t('step_of', { n: 1 })}</Text>
+              <Text style={styles.qTitle}>{t('q_whats_goal')}</Text>
+              <Text style={styles.qSub}>{t('q_whats_goal_sub')}</Text>
               <TextInput
                 testID="new-goal-title-input"
                 value={title}
                 onChangeText={setTitle}
-                placeholder="e.g. Run a half marathon by June"
+                placeholder={t('goal_placeholder')}
                 placeholderTextColor={colors.textTertiary}
                 style={styles.input}
                 multiline
@@ -83,9 +85,9 @@ export default function NewGoal() {
           )}
           {step === 1 && (
             <>
-              <Text style={styles.eyebrow}>STEP 2 OF 4</Text>
-              <Text style={styles.qTitle}>By when?</Text>
-              <Text style={styles.qSub}>Your target completion date.</Text>
+              <Text style={styles.eyebrow}>{t('step_of', { n: 2 })}</Text>
+              <Text style={styles.qTitle}>{t('q_by_when')}</Text>
+              <Text style={styles.qSub}>{t('q_by_when_sub')}</Text>
               <TextInput
                 testID="new-goal-deadline-input"
                 value={deadline}
@@ -94,19 +96,19 @@ export default function NewGoal() {
                 placeholderTextColor={colors.textTertiary}
                 style={styles.input}
               />
-              <Text style={styles.hint}>Format: 2026-06-15</Text>
+              <Text style={styles.hint}>{t('date_format_hint')}</Text>
             </>
           )}
           {step === 2 && (
             <>
-              <Text style={styles.eyebrow}>STEP 3 OF 4</Text>
-              <Text style={styles.qTitle}>Why does this matter?</Text>
-              <Text style={styles.qSub}>Your motivation keeps you accountable.</Text>
+              <Text style={styles.eyebrow}>{t('step_of', { n: 3 })}</Text>
+              <Text style={styles.qTitle}>{t('q_why_matters')}</Text>
+              <Text style={styles.qSub}>{t('q_why_matters_sub')}</Text>
               <TextInput
                 testID="new-goal-motivation-input"
                 value={motivation}
                 onChangeText={setMotivation}
-                placeholder="I want to prove to myself…"
+                placeholder={t('motivation_placeholder')}
                 placeholderTextColor={colors.textTertiary}
                 style={[styles.input, { minHeight: 120 }]}
                 multiline
@@ -115,11 +117,11 @@ export default function NewGoal() {
           )}
           {step === 3 && (
             <>
-              <Text style={styles.eyebrow}>STEP 4 OF 4</Text>
-              <Text style={styles.qTitle}>Where are you now?</Text>
-              <Text style={styles.qSub}>Current level & weekly time commitment.</Text>
+              <Text style={styles.eyebrow}>{t('step_of', { n: 4 })}</Text>
+              <Text style={styles.qTitle}>{t('q_where_now')}</Text>
+              <Text style={styles.qSub}>{t('q_where_now_sub')}</Text>
 
-              <Text style={styles.label}>Current level</Text>
+              <Text style={styles.label}>{t('current_level')}</Text>
               {LEVELS.map(l => (
                 <TouchableOpacity
                   key={l.key}
@@ -135,7 +137,7 @@ export default function NewGoal() {
                 </TouchableOpacity>
               ))}
 
-              <Text style={[styles.label, { marginTop: spacing.md }]}>Hours per week: {hours}</Text>
+              <Text style={[styles.label, { marginTop: spacing.md }]}>{t('hours_per_week', { n: hours })}</Text>
               <View style={styles.hoursRow}>
                 {HOURS.map(h => (
                   <TouchableOpacity
@@ -160,7 +162,7 @@ export default function NewGoal() {
               onPress={next}
               testID="new-goal-next-btn"
             >
-              <Text style={styles.nextText}>Continue</Text>
+              <Text style={styles.nextText}>{t('continue')}</Text>
               <Feather name="arrow-right" size={18} color="#fff" />
             </TouchableOpacity>
           ) : (
@@ -170,7 +172,7 @@ export default function NewGoal() {
               onPress={submit}
               testID="new-goal-submit-btn"
             >
-              {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.nextText}>Generate AI Plan</Text>}
+              {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.nextText}>{t('generate_plan')}</Text>}
               {!loading && <Feather name="zap" size={18} color="#fff" />}
             </TouchableOpacity>
           )}
