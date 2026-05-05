@@ -45,6 +45,9 @@ PACKAGES = {
     "coach_annual":   {"plan": "coach", "billing": "annual",  "amount": 252.00, "currency": "usd"},
 }
 
+# Active-goals cap by plan (None = unlimited)
+PLAN_GOAL_LIMITS = {"free": 1, "pro": 5, "coach": None}
+
 app = FastAPI()
 api = APIRouter(prefix="/api")
 security = HTTPBearer(auto_error=False)
@@ -122,6 +125,11 @@ class TaskToggleReq(BaseModel):
 class CheckoutSessionReq(BaseModel):
     package_id: str
     origin_url: str  # from window.location.origin / app deep-link origin
+
+
+class PushTokenReq(BaseModel):
+    token: str
+    platform: Optional[str] = None  # 'ios' | 'android' | 'web'
 
 
 # ---------- Auth Endpoints ----------
@@ -227,11 +235,19 @@ Create 3-5 milestones, 4 weeks of weekly_plan, and 5-7 daily_tasks starting day_
 # ---------- Goals Endpoints ----------
 @api.post("/goals")
 async def create_goal(req: GoalCreateReq, user: dict = Depends(get_current_user)):
-    # Free plan: 1 active goal
-    if user.get("plan", "free") == "free":
+    # Plan-based active-goal cap
+    plan = user.get("plan", "free")
+    limit = PLAN_GOAL_LIMITS.get(plan, 1)
+    if limit is not None:
         count = await db.goals.count_documents({"user_id": user["id"], "status": "active"})
-        if count >= 1:
-            raise HTTPException(status_code=402, detail="Free plan allows 1 active goal. Upgrade to Pro.")
+        if count >= limit:
+            if plan == "free":
+                detail = "Free plan allows 1 active goal. Upgrade to Pro for up to 5."
+            elif plan == "pro":
+                detail = "Pro plan allows 5 active goals. Upgrade to Coach for unlimited."
+            else:
+                detail = f"Plan limit reached ({limit} active goals)."
+            raise HTTPException(status_code=402, detail=detail)
 
     goal_id = str(uuid.uuid4())
     goal_doc = {
@@ -714,6 +730,30 @@ async def calendar_url(user: dict = Depends(get_current_user)):
     """Return a webcal/https URL the user can subscribe to from their device calendar."""
     token = create_access_token(user["id"], user["email"])
     return {"token": token}
+
+
+# ---------- Push Notification Tokens ----------
+@api.post("/notifications/token")
+async def save_push_token(req: PushTokenReq, user: dict = Depends(get_current_user)):
+    if not req.token:
+        raise HTTPException(status_code=400, detail="Missing token")
+    await db.push_tokens.update_one(
+        {"user_id": user["id"], "token": req.token},
+        {"$set": {
+            "user_id": user["id"],
+            "token": req.token,
+            "platform": req.platform or "unknown",
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }},
+        upsert=True,
+    )
+    return {"ok": True}
+
+
+@api.delete("/notifications/token")
+async def remove_push_token(token: str, user: dict = Depends(get_current_user)):
+    await db.push_tokens.delete_one({"user_id": user["id"], "token": token})
+    return {"ok": True}
 
 
 # ---------- Startup ----------

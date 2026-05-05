@@ -7,6 +7,7 @@ import { colors, spacing, radii } from '../../src/theme';
 import { api } from '../../src/api';
 import { useAuth } from '../../src/AuthContext';
 import ProgressRing from '../../src/ProgressRing';
+import { scheduleTaskReminders, getAndRegisterPushToken } from '../../src/notifications';
 
 type Task = { id: string; title: string; priority: string; est_minutes: number; completed: boolean; goal_id: string; due_date: string };
 type Stats = { today_total: number; today_done: number; today_pct: number; active_goals: number; total_completed: number; missed: number; streak: number };
@@ -26,14 +27,19 @@ export default function Dashboard() {
     try {
       const [s, t, m, n] = await Promise.all([
         api.get('/dashboard/stats'),
-        api.get('/tasks/today'),
+        api.get('/tasks'),
         api.get('/tasks/missed'),
         api.get('/nudge'),
       ]);
       setStats(s.data);
-      setTasks(t.data);
+      const all = t.data as Task[];
+      const today = new Date().toISOString().slice(0, 10);
+      setTasks(all.filter((x) => x.due_date === today));
       setMissed(m.data);
       setNudge(n.data);
+      // Fire and forget — schedule local reminders + register push token
+      scheduleTaskReminders(all as any);
+      getAndRegisterPushToken();
     } catch (e) { console.log('load err', e); }
     finally { setLoading(false); setRefreshing(false); }
   }
