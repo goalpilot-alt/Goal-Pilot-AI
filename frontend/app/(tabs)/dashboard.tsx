@@ -10,6 +10,7 @@ import ProgressRing from '../../src/ProgressRing';
 
 type Task = { id: string; title: string; priority: string; est_minutes: number; completed: boolean; goal_id: string; due_date: string };
 type Stats = { today_total: number; today_done: number; today_pct: number; active_goals: number; total_completed: number; missed: number; streak: number };
+type Nudge = { show: boolean; title?: string; message?: string; days_since?: number | null; suggested_task?: Task | null };
 
 export default function Dashboard() {
   const router = useRouter();
@@ -17,21 +18,33 @@ export default function Dashboard() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [missed, setMissed] = useState<Task[]>([]);
+  const [nudge, setNudge] = useState<Nudge | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
   async function load() {
     try {
-      const [s, t, m] = await Promise.all([
+      const [s, t, m, n] = await Promise.all([
         api.get('/dashboard/stats'),
         api.get('/tasks/today'),
         api.get('/tasks/missed'),
+        api.get('/nudge'),
       ]);
       setStats(s.data);
       setTasks(t.data);
       setMissed(m.data);
+      setNudge(n.data);
     } catch (e) { console.log('load err', e); }
     finally { setLoading(false); setRefreshing(false); }
+  }
+
+  async function doQuickWin() {
+    if (!nudge?.suggested_task) return;
+    const task = nudge.suggested_task;
+    try {
+      await api.patch(`/tasks/${task.id}`, { completed: true });
+      load();
+    } catch {}
   }
 
   useFocusEffect(useCallback(() => { load(); }, []));
@@ -88,6 +101,22 @@ export default function Dashboard() {
             </View>
           </View>
         </View>
+
+        {nudge?.show ? (
+          <View style={styles.nudgeCard} testID="nudge-card">
+            <View style={styles.nudgeRow}>
+              <Feather name="life-buoy" size={18} color={colors.secondary} />
+              <Text style={styles.nudgeTitle}>{nudge.title}</Text>
+            </View>
+            <Text style={styles.nudgeMsg}>{nudge.message}</Text>
+            {nudge.suggested_task ? (
+              <TouchableOpacity testID="nudge-quick-win" style={styles.nudgeBtn} onPress={doQuickWin}>
+                <Feather name="zap" size={14} color={colors.bg} />
+                <Text style={styles.nudgeBtnText}>Do this one: {nudge.suggested_task.title}</Text>
+              </TouchableOpacity>
+            ) : null}
+          </View>
+        ) : null}
 
         {(missed && missed.length > 0) ? (
           <View style={styles.alertCard}>
@@ -189,4 +218,10 @@ const styles = StyleSheet.create({
   priorityDot: { width: 6, height: 6, borderRadius: 3 },
   taskMetaText: { color: colors.textTertiary, fontSize: 12, fontWeight: '500', textTransform: 'capitalize' },
   missedLabel: { color: colors.warning, fontSize: 12, marginTop: 4 },
+  nudgeCard: { backgroundColor: 'rgba(0,240,255,0.08)', borderWidth: 1, borderColor: 'rgba(0,240,255,0.35)', borderRadius: radii.lg, padding: spacing.md, marginBottom: spacing.md },
+  nudgeRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginBottom: 4 },
+  nudgeTitle: { color: colors.secondary, fontWeight: '800', fontSize: 15 },
+  nudgeMsg: { color: colors.textPrimary, fontSize: 14, lineHeight: 20, marginTop: 2, marginBottom: spacing.sm },
+  nudgeBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: colors.secondary, paddingVertical: 10, borderRadius: radii.full },
+  nudgeBtnText: { color: colors.bg, fontWeight: '800', fontSize: 13 },
 });

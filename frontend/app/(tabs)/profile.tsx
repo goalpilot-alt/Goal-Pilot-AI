@@ -1,15 +1,42 @@
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, Platform, Linking } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import * as WebBrowser from 'expo-web-browser';
 import { colors, spacing, radii } from '../../src/theme';
 import { useAuth } from '../../src/AuthContext';
+import { api } from '../../src/api';
+import { useState } from 'react';
+
+const BACKEND = process.env.EXPO_PUBLIC_BACKEND_URL;
 
 export default function Profile() {
   const { user, logout } = useAuth();
   const router = useRouter();
+  const [syncing, setSyncing] = useState(false);
 
   const plan = user?.plan || 'free';
+
+  async function syncCalendar() {
+    setSyncing(true);
+    try {
+      const { data } = await api.get('/calendar/url');
+      const url = `${BACKEND}/api/calendar/export.ics?token=${data.token}`;
+      if (Platform.OS === 'web') {
+        // On web, open in a new tab so user can download / subscribe
+        window.open(url, '_blank');
+      } else {
+        // Native: open the webcal: URL so OS offers to subscribe in calendar app
+        const webcal = url.replace(/^https?:\/\//, 'webcal://');
+        const supported = await Linking.canOpenURL(webcal);
+        if (supported) await Linking.openURL(webcal);
+        else await WebBrowser.openBrowserAsync(url);
+      }
+      Alert.alert('Calendar sync', 'Your device calendar will now stay in sync with GoalPilot tasks & deadlines.');
+    } catch {
+      Alert.alert('Oops', 'Could not prepare calendar sync.');
+    } finally { setSyncing(false); }
+  }
 
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
@@ -31,28 +58,30 @@ export default function Profile() {
         <TouchableOpacity style={styles.upgradeCard} onPress={() => router.push('/pricing')} testID="profile-upgrade-btn">
           <View style={{ flex: 1 }}>
             <Text style={styles.upgradeEyebrow}>UPGRADE</Text>
-            <Text style={styles.upgradeTitle}>Unlock unlimited goals & daily coaching</Text>
-            <Text style={styles.upgradeSub}>Pro & Coach plans from $12/month</Text>
+            <Text style={styles.upgradeTitle}>Save 25% with annual plans</Text>
+            <Text style={styles.upgradeSub}>Pro from $9/mo · Coach from $21/mo</Text>
           </View>
           <Feather name="arrow-right" size={22} color="#fff" />
         </TouchableOpacity>
 
         <Text style={styles.sectionTitle}>Settings</Text>
+
+        <TouchableOpacity style={styles.row} onPress={syncCalendar} disabled={syncing} testID="profile-calendar-btn">
+          <Feather name="calendar" size={18} color={colors.textPrimary} />
+          <View style={{ flex: 1 }}>
+            <Text style={styles.rowText}>Sync to Calendar</Text>
+            <Text style={styles.rowSub}>Subscribe in Apple · Google · Outlook</Text>
+          </View>
+          <Feather name={syncing ? 'loader' : 'external-link'} size={16} color={colors.textTertiary} />
+        </TouchableOpacity>
+
         <View style={styles.row}>
           <Feather name="bell" size={18} color={colors.textPrimary} />
           <View style={{ flex: 1 }}>
             <Text style={styles.rowText}>Smart reminders</Text>
-            <Text style={styles.rowSub}>Daily nudges for your tasks</Text>
+            <Text style={styles.rowSub}>Daily nudges & streak recovery</Text>
           </View>
           <View style={[styles.toggle, styles.toggleOn]}><View style={[styles.knob, styles.knobOn]} /></View>
-        </View>
-        <View style={styles.row}>
-          <Feather name="calendar" size={18} color={colors.textPrimary} />
-          <View style={{ flex: 1 }}>
-            <Text style={styles.rowText}>Calendar sync</Text>
-            <Text style={styles.rowSub}>Pro — coming soon</Text>
-          </View>
-          <Feather name="lock" size={16} color={colors.textTertiary} />
         </View>
 
         <TouchableOpacity style={styles.logout} onPress={logout} testID="profile-logout-btn">
@@ -60,7 +89,7 @@ export default function Profile() {
           <Text style={styles.logoutText}>Log out</Text>
         </TouchableOpacity>
 
-        <Text style={styles.footer}>GoalPilot AI · v1.0</Text>
+        <Text style={styles.footer}>GoalPilot AI · v1.1</Text>
       </ScrollView>
     </SafeAreaView>
   );

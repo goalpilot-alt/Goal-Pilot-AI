@@ -7,18 +7,36 @@ import { api } from '../src/api';
 import { useAuth } from '../src/AuthContext';
 import { useState } from 'react';
 
-const PLANS = [
+type Cycle = 'monthly' | 'annual';
+
+const PLANS: Array<{
+  key: string;
+  name: string;
+  monthly: string;
+  annual: string;
+  annualTotal: string;
+  save: string | null;
+  highlight?: boolean;
+  features: string[];
+  cta: string;
+}> = [
   {
     key: 'free',
     name: 'Free',
-    price: '$0',
+    monthly: '$0',
+    annual: '$0',
+    annualTotal: '$0',
+    save: null,
     features: ['1 active goal', 'Basic AI plan', 'Manual tracking', 'Basic reminders'],
     cta: 'Current',
   },
   {
     key: 'pro',
     name: 'Pro',
-    price: '$12',
+    monthly: '$12',
+    annual: '$9',
+    annualTotal: '$108/yr',
+    save: 'Save $36',
     highlight: true,
     features: ['Up to 5 goals', 'AI goal breakdown', 'Smart reminders', 'Calendar integration', 'Weekly AI review'],
     cta: 'Upgrade to Pro',
@@ -26,7 +44,10 @@ const PLANS = [
   {
     key: 'coach',
     name: 'Coach',
-    price: '$29',
+    monthly: '$29',
+    annual: '$21',
+    annualTotal: '$252/yr',
+    save: 'Save $96',
     features: ['Unlimited goals', 'Daily AI coaching', 'Advanced insights', 'Accountability mode', 'Priority automation'],
     cta: 'Upgrade to Coach',
   },
@@ -36,17 +57,17 @@ export default function Pricing() {
   const router = useRouter();
   const { user, refreshUser } = useAuth();
   const [busy, setBusy] = useState<string | null>(null);
+  const [cycle, setCycle] = useState<Cycle>('annual');
   const current = user?.plan || 'free';
 
   async function upgrade(plan: string) {
     if (plan === current) return;
     setBusy(plan);
     try {
-      // NOTE: Stripe integration is MOCKED for MVP — this simulates a successful payment.
-      await api.post(`/subscription/upgrade?plan=${plan}`);
+      await api.post(`/subscription/upgrade?plan=${plan}&billing=${cycle}`);
       await refreshUser();
-      Alert.alert('Success', `You're now on the ${plan.toUpperCase()} plan! (Stripe integration mocked for MVP)`);
-    } catch (e: any) {
+      Alert.alert('Welcome aboard', `You're on ${plan.toUpperCase()} (${cycle}). Stripe checkout is MOCKED for MVP.`);
+    } catch {
       Alert.alert('Oops', 'Could not complete upgrade.');
     } finally { setBusy(null); }
   }
@@ -62,8 +83,27 @@ export default function Pricing() {
         <Text style={styles.title}>Go all-in on your goals.</Text>
         <Text style={styles.sub}>Cancel anytime. 7-day free trial on Pro & Coach.</Text>
 
+        <View style={styles.toggleWrap}>
+          <TouchableOpacity
+            testID="pricing-toggle-monthly"
+            style={[styles.toggleSeg, cycle === 'monthly' && styles.toggleSegActive]}
+            onPress={() => setCycle('monthly')}
+          >
+            <Text style={[styles.toggleText, cycle === 'monthly' && styles.toggleTextActive]}>Monthly</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            testID="pricing-toggle-annual"
+            style={[styles.toggleSeg, cycle === 'annual' && styles.toggleSegActive]}
+            onPress={() => setCycle('annual')}
+          >
+            <Text style={[styles.toggleText, cycle === 'annual' && styles.toggleTextActive]}>Annual</Text>
+            <View style={styles.saveBadge}><Text style={styles.saveBadgeText}>-25%</Text></View>
+          </TouchableOpacity>
+        </View>
+
         {PLANS.map(p => {
           const active = current === p.key;
+          const price = cycle === 'annual' ? p.annual : p.monthly;
           return (
             <View
               key={p.key}
@@ -75,9 +115,15 @@ export default function Pricing() {
               )}
               <Text style={styles.planName}>{p.name}</Text>
               <View style={styles.priceRow}>
-                <Text style={styles.price}>{p.price}</Text>
-                {p.price !== '$0' && <Text style={styles.per}>/month</Text>}
+                <Text style={styles.price}>{price}</Text>
+                {p.monthly !== '$0' && <Text style={styles.per}>/month</Text>}
               </View>
+              {cycle === 'annual' && p.save ? (
+                <View style={styles.saveRow}>
+                  <Text style={styles.saveTxt}>{p.save}</Text>
+                  <Text style={styles.saveSub}>• Billed {p.annualTotal}</Text>
+                </View>
+              ) : null}
               {p.features.map((f, i) => (
                 <View key={i} style={styles.featRow}>
                   <Feather name="check" size={15} color={colors.primary} />
@@ -111,6 +157,13 @@ const styles = StyleSheet.create({
   eyebrow: { color: colors.primary, fontSize: 11, fontWeight: '700', letterSpacing: 2 },
   title: { color: colors.textPrimary, fontSize: 30, fontWeight: '800', letterSpacing: -0.5, marginTop: spacing.xs },
   sub: { color: colors.textSecondary, marginTop: spacing.sm, marginBottom: spacing.lg },
+  toggleWrap: { flexDirection: 'row', backgroundColor: colors.surfaceElev, borderRadius: radii.full, padding: 4, marginBottom: spacing.lg, borderWidth: 1, borderColor: colors.border },
+  toggleSeg: { flex: 1, paddingVertical: 10, borderRadius: radii.full, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 6 },
+  toggleSegActive: { backgroundColor: colors.primary },
+  toggleText: { color: colors.textSecondary, fontWeight: '700', fontSize: 14 },
+  toggleTextActive: { color: '#fff' },
+  saveBadge: { backgroundColor: colors.secondary, paddingVertical: 2, paddingHorizontal: 6, borderRadius: radii.sm },
+  saveBadgeText: { color: colors.bg, fontSize: 10, fontWeight: '800' },
   card: { backgroundColor: colors.surface, borderRadius: radii.lg, padding: spacing.lg, marginBottom: spacing.md, borderWidth: 1, borderColor: colors.border },
   cardHighlight: { borderColor: colors.primary, shadowColor: colors.primary, shadowOpacity: 0.3, shadowRadius: 20, shadowOffset: { width: 0, height: 4 } },
   cardActive: { borderColor: colors.success },
@@ -120,6 +173,9 @@ const styles = StyleSheet.create({
   priceRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 4, marginVertical: spacing.sm },
   price: { color: colors.textPrimary, fontSize: 38, fontWeight: '800', letterSpacing: -1 },
   per: { color: colors.textSecondary, fontSize: 14, marginBottom: 8 },
+  saveRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: spacing.sm },
+  saveTxt: { color: colors.success, fontSize: 12, fontWeight: '800', letterSpacing: 0.5 },
+  saveSub: { color: colors.textTertiary, fontSize: 12 },
   featRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginVertical: 6 },
   featText: { color: colors.textPrimary, fontSize: 14 },
   cta: { marginTop: spacing.md, backgroundColor: colors.surfaceElev, paddingVertical: 14, borderRadius: radii.full, alignItems: 'center' },

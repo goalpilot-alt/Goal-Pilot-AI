@@ -430,11 +430,137 @@ Return JSON:
 
 # ---------- Mock Subscription ----------
 @api.post("/subscription/upgrade")
-async def upgrade(plan: str, user: dict = Depends(get_current_user)):
+async def upgrade(plan: str, billing: str = "monthly", user: dict = Depends(get_current_user)):
     if plan not in ("free", "pro", "coach"):
         raise HTTPException(status_code=400, detail="Invalid plan")
-    await db.users.update_one({"id": user["id"]}, {"$set": {"plan": plan}})
-    return {"ok": True, "plan": plan}
+    if billing not in ("monthly", "annual"):
+        raise HTTPException(status_code=400, detail="Invalid billing cycle")
+    await db.users.update_one(
+        {"id": user["id"]},
+        {"$set": {"plan": plan, "billing": billing, "upgraded_at": datetime.now(timezone.utc).isoformat()}},
+    )
+    return {"ok": True, "plan": plan, "billing": billing}
+
+
+# ---------- Streak Recovery Nudge ----------
+@api.get("/nudge")
+async def get_nudge(user: dict = Depends(get_current_user)):
+    today = datetime.now(timezone.utc).date()
+    today_s = today.isoformat()
+
+    # Days since last completed task
+    last = await db.tasks.find_one(
+        {"user_id": user["id"], "completed": True},
+        sort=[("completed_at", -1)],
+        projection={"_id": 0, "completed_at": 1, "title": 1},
+    )
+    days_since = None
+    if last and last.get("completed_at"):
+        last_date = datetime.fromisoformat(last["completed_at"]).date()
+        days_since = (today - last_date).days
+
+    # Find an easy missed/today task to recommend
+    easy_task = await db.tasks.find_one(
+        {"user_id": user["id"], "completed": False, "priority": {"$in": ["low", "medium"]}},
+        sort=[("est_minutes", 1)],
+        projection={"_id": 0},
+    )
+
+    show_nudge = days_since is None or days_since >= 1
+    if not show_nudge:
+        return {"show": False}
+
+    if days_since is None:
+        title = "Let's start your streak"
+        message = "Complete one small task today to kick off your momentum."
+    elif days_since == 1:
+        title = "Don't break the chain"
+        message = "It's been a day. One quick win keeps your streak alive."
+    elif days_since <= 3:
+        title = f"{days_since} days off-plan"
+        message = "Comebacks beat perfection. Pick the easiest task and win it now."
+    else:
+        title = "Restart, fresh"
+        message = f"It's been {days_since} days. We've adapted your plan — start with one tiny task."
+
+    return {
+        "show": True,
+        "title": title,
+        "message": message,
+        "days_since": days_since,
+        "suggested_task": easy_task,
+    }
+
+
+# ---------- Calendar Sync (ICS export) ----------
+@api.get("/calendar/export.ics")
+async def calendar_ics(token: str):
+    """Return .ics file. Auth via query token because calendar apps can't send headers."""
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGO])
+        user_id = payload["sub"]
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+    tasks = await db.tasks.find({"user_id": user_id}, {"_id": 0}).to_list(500)
+    goals = await db.goals.find({"user_id": user_id}, {"_id": 0}).to_list(50)
+
+    lines = [
+        "BEGIN:VCALENDAR",
+        "VERSION:2.0",
+        "PRODID:-//GoalPilot AI//EN",
+        "CALSCALE:GREGORIAN",
+        "METHOD:PUBLISH",
+        "X-WR-CALNAME:GoalPilot AI",
+    ]
+    now_stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+
+    for t in tasks:
+        due = t.get("due_date", "")
+        if not due:
+            continue
+        dt = due.replace("-", "")
+        uid = f"task-{t['id']}@goalpilot.ai"
+        summary = (t.get("title") or "Task").replace("\n", " ")
+        lines += [
+            "BEGIN:VEVENT",
+            f"UID:{uid}",
+            f"DTSTAMP:{now_stamp}",
+            f"DTSTART;VALUE=DATE:{dt}",
+            f"DTEND;VALUE=DATE:{dt}",
+            f"SUMMARY:{summary}",
+            f"DESCRIPTION:Priority: {t.get('priority','')} | {t.get('est_minutes',0)} min",
+            "END:VEVENT",
+        ]
+
+    for g in goals:
+        deadline = g.get("deadline", "")
+        if not deadline:
+            continue
+        dt = deadline.replace("-", "")
+        uid = f"goal-{g['id']}@goalpilot.ai"
+        summary = f"GOAL DEADLINE: {g.get('title','')}"
+        lines += [
+            "BEGIN:VEVENT",
+            f"UID:{uid}",
+            f"DTSTAMP:{now_stamp}",
+            f"DTSTART;VALUE=DATE:{dt}",
+            f"DTEND;VALUE=DATE:{dt}",
+            f"SUMMARY:{summary}",
+            "END:VEVENT",
+        ]
+
+    lines.append("END:VCALENDAR")
+    body = "\r\n".join(lines)
+    from fastapi.responses import Response
+    return Response(content=body, media_type="text/calendar; charset=utf-8")
+
+
+@api.get("/calendar/url")
+async def calendar_url(user: dict = Depends(get_current_user)):
+    """Return a webcal/https URL the user can subscribe to from their device calendar."""
+    token = create_access_token(user["id"], user["email"])
+    return {"token": token}
 
 
 # ---------- Startup ----------
