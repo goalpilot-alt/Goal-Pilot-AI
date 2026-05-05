@@ -20,6 +20,12 @@ from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, Field, EmailStr
 
 from emergentintegrations.llm.chat import LlmChat, UserMessage
+from emergentintegrations.payments.stripe.checkout import (
+    StripeCheckout,
+    CheckoutSessionRequest,
+    CheckoutSessionResponse,
+    CheckoutStatusResponse,
+)
 
 # ---------- Setup ----------
 mongo_url = os.environ['MONGO_URL']
@@ -29,6 +35,15 @@ db = client[os.environ['DB_NAME']]
 JWT_SECRET = os.environ['JWT_SECRET']
 JWT_ALGO = "HS256"
 EMERGENT_LLM_KEY = os.environ['EMERGENT_LLM_KEY']
+STRIPE_API_KEY = os.environ['STRIPE_API_KEY']
+
+# Server-side plan catalog — NEVER trust amounts from client
+PACKAGES = {
+    "pro_monthly":    {"plan": "pro",   "billing": "monthly", "amount": 12.00, "currency": "usd"},
+    "pro_annual":     {"plan": "pro",   "billing": "annual",  "amount": 108.00, "currency": "usd"},
+    "coach_monthly":  {"plan": "coach", "billing": "monthly", "amount": 29.00, "currency": "usd"},
+    "coach_annual":   {"plan": "coach", "billing": "annual",  "amount": 252.00, "currency": "usd"},
+}
 
 app = FastAPI()
 api = APIRouter(prefix="/api")
@@ -102,6 +117,11 @@ class GoalCreateReq(BaseModel):
 
 class TaskToggleReq(BaseModel):
     completed: bool
+
+
+class CheckoutSessionReq(BaseModel):
+    package_id: str
+    origin_url: str  # from window.location.origin / app deep-link origin
 
 
 # ---------- Auth Endpoints ----------
@@ -428,7 +448,129 @@ Return JSON:
     }
 
 
-# ---------- Mock Subscription ----------
+# ---------- Stripe Checkout ----------
+@api.post("/checkout/session")
+async def create_checkout_session(req: CheckoutSessionReq, http_request: Request, user: dict = Depends(get_current_user)):
+    if req.package_id not in PACKAGES:
+        raise HTTPException(status_code=400, detail="Invalid package")
+    pkg = PACKAGES[req.package_id]
+
+    origin = req.origin_url.rstrip("/")
+    success_url = f"{origin}/payment/success?session_id={{CHECKOUT_SESSION_ID}}"
+    cancel_url = f"{origin}/pricing"
+
+    host_url = str(http_request.base_url)
+    webhook_url = f"{host_url.rstrip('/')}/api/webhook/stripe"
+    checkout = StripeCheckout(api_key=STRIPE_API_KEY, webhook_url=webhook_url)
+
+    metadata = {
+        "user_id": user["id"],
+        "user_email": user["email"],
+        "package_id": req.package_id,
+        "plan": pkg["plan"],
+        "billing": pkg["billing"],
+    }
+
+    checkout_req = CheckoutSessionRequest(
+        amount=pkg["amount"],
+        currency=pkg["currency"],
+        success_url=success_url,
+        cancel_url=cancel_url,
+        metadata=metadata,
+    )
+    session: CheckoutSessionResponse = await checkout.create_checkout_session(checkout_req)
+
+    # Record transaction as initiated BEFORE returning
+    await db.payment_transactions.insert_one({
+        "id": str(uuid.uuid4()),
+        "session_id": session.session_id,
+        "user_id": user["id"],
+        "user_email": user["email"],
+        "package_id": req.package_id,
+        "plan": pkg["plan"],
+        "billing": pkg["billing"],
+        "amount": pkg["amount"],
+        "currency": pkg["currency"],
+        "payment_status": "initiated",
+        "status": "open",
+        "metadata": metadata,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    })
+
+    return {"url": session.url, "session_id": session.session_id}
+
+
+@api.get("/checkout/status/{session_id}")
+async def get_checkout_status(session_id: str, user: dict = Depends(get_current_user)):
+    tx = await db.payment_transactions.find_one({"session_id": session_id, "user_id": user["id"]}, {"_id": 0})
+    if not tx:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+
+    # If already finalized, return stored state (idempotent)
+    if tx.get("payment_status") == "paid":
+        return {
+            "payment_status": "paid",
+            "status": tx.get("status", "complete"),
+            "amount_total": int(tx["amount"] * 100),
+            "currency": tx["currency"],
+            "plan": tx["plan"],
+            "billing": tx["billing"],
+        }
+
+    checkout = StripeCheckout(api_key=STRIPE_API_KEY, webhook_url="")
+    status: CheckoutStatusResponse = await checkout.get_checkout_status(session_id)
+
+    update = {
+        "payment_status": status.payment_status,
+        "status": status.status,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.payment_transactions.update_one({"session_id": session_id}, {"$set": update})
+
+    # Only grant plan once per session
+    if status.payment_status == "paid" and tx.get("payment_status") != "paid":
+        await db.users.update_one(
+            {"id": user["id"]},
+            {"$set": {"plan": tx["plan"], "billing": tx["billing"], "upgraded_at": datetime.now(timezone.utc).isoformat()}},
+        )
+
+    return {
+        "payment_status": status.payment_status,
+        "status": status.status,
+        "amount_total": status.amount_total,
+        "currency": status.currency,
+        "plan": tx["plan"],
+        "billing": tx["billing"],
+    }
+
+
+@api.post("/webhook/stripe")
+async def stripe_webhook(request: Request):
+    body = await request.body()
+    signature = request.headers.get("Stripe-Signature", "")
+    checkout = StripeCheckout(api_key=STRIPE_API_KEY, webhook_url="")
+    try:
+        event = await checkout.handle_webhook(body, signature)
+    except Exception as e:
+        logger.error(f"Stripe webhook error: {e}")
+        raise HTTPException(status_code=400, detail="Invalid webhook")
+
+    if event.payment_status == "paid" and event.session_id:
+        tx = await db.payment_transactions.find_one({"session_id": event.session_id})
+        if tx and tx.get("payment_status") != "paid":
+            await db.payment_transactions.update_one(
+                {"session_id": event.session_id},
+                {"$set": {"payment_status": "paid", "status": "complete", "updated_at": datetime.now(timezone.utc).isoformat()}},
+            )
+            await db.users.update_one(
+                {"id": tx["user_id"]},
+                {"$set": {"plan": tx["plan"], "billing": tx["billing"], "upgraded_at": datetime.now(timezone.utc).isoformat()}},
+            )
+    return {"ok": True}
+
+
+# ---------- Legacy Mock (kept for backward compat; do not use for real upgrades) ----------
 @api.post("/subscription/upgrade")
 async def upgrade(plan: str, billing: str = "monthly", user: dict = Depends(get_current_user)):
     if plan not in ("free", "pro", "coach"):

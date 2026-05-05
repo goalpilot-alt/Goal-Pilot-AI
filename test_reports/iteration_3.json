@@ -1,0 +1,47 @@
+{
+  "summary": "GoalPilot AI — iteration 3 (Stripe Checkout via emergentintegrations). Backend: 21/22 pytest pass. POST /api/checkout/session works for all 4 packages (pro_monthly $12, pro_annual $108, coach_monthly $29, coach_annual $252) returning a real https://checkout.stripe.com URL + session_id. Mongo payment_transactions row is created with status=open, payment_status=initiated, and amount sourced from the server-side PACKAGES dict (verified by attempting client override amount=0.01/currency=eur — server still wrote 12.00 USD). Auth (401) and invalid package (400) work. Checkout status returns 404 for unknown session and requires auth. REGRESSION green: /api/auth/me, /api/goals, /api/tasks/today, /api/nudge, /api/calendar/url, /api/calendar/export.ics, /api/review/weekly, /api/subscription/upgrade, /api/dashboard/stats. ❌ One critical issue: GET /api/checkout/status/{real_session_id} returns 500 (CheckoutError 'No such checkout.session') because session creation is routed through the Emergent Stripe proxy (integrations.emergentagent.com) but the status lookup hits api.stripe.com directly which does not recognize the proxy-issued session_id.",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "GET /api/checkout/status/{session_id}",
+        "issue": "Returns 500 Internal Server Error for sessions created via POST /api/checkout/session. emergentintegrations.payments.stripe.checkout.CheckoutError: 'Failed to retrieve session status: Request req_xxx: No such checkout.session: cs_test_xxx'. Session creation logs show the proxy URL https://integrations.emergentagent.com/stripe/v1/checkout/sessions, but the StripeCheckout.get_checkout_status() call does not appear to use the same proxy and goes to api.stripe.com which doesn't have the session. The endpoint should return payment_status='unpaid' or 'open' for a freshly created session per the review request ('endpoint will return pending/open until a real card is entered'). Also the unhandled exception leaks a 500 instead of being mapped to a proper HTTP error.",
+        "priority": "CRITICAL"
+      }
+    ],
+    "minor": [
+      {"endpoint": "POST /api/checkout/session", "issue": "No auth returns 403 (HTTPBearer auto_error=False + manual 401 in get_current_user is correct, but FastAPI returns 403 'Not authenticated' from the security dep before reaching the handler in some test paths). Functional behavior is correct; just noting status-code semantics for spec consistency."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_stripe_checkout.py",
+    "/app/test_reports/pytest/stripe_checkout_results.xml"
+  ],
+  "action_items": [
+    "Fix GET /api/checkout/status/{session_id}: ensure StripeCheckout used for retrieval is configured the same way as creation (same api_key + same webhook_url/proxy) so that proxy-issued session_ids resolve. Also wrap the call in try/except — on CheckoutError return the locally stored tx state (status=open, payment_status=initiated) instead of bubbling up a 500.",
+    "(Optional) Standardize 401 vs 403 across protected endpoints (HTTPBearer with auto_error=False already in place; consider raising 401 in a single dependency)."
+  ],
+  "critical_code_review_comments": [
+    "server.py /api/checkout/status: Two StripeCheckout instances are created with different webhook_url (creation passes a real webhook_url, status passes ''). If emergentintegrations routes through the proxy based on the webhook_url or another env config, this asymmetry could be the cause of the 500. Recommend constructing one helper that always returns a properly configured StripeCheckout client.",
+    "server.py /api/checkout/status: No try/except around checkout.get_checkout_status. Any Stripe transient/permission error becomes a 500 to the user. At minimum log + return the locally stored payment_status from the tx so the success page can poll without crashing.",
+    "server.py PACKAGES dict: amounts hard-coded — fine for MVP but consider moving to config / DB so non-dev can tweak prices without redeploy. Also amounts are floats; Stripe expects cents (int). emergentintegrations probably handles the *100 internally, but keep an eye on rounding for $108.00 / $252.00.",
+    "server.py /api/checkout/session: success_url uses the literal string '{CHECKOUT_SESSION_ID}' (good — Stripe substitutes), but the cancel_url goes back to /pricing without preserving the package_id, so the user has to re-pick the plan if they bail. Minor UX.",
+    "server.py /api/webhook/stripe: relies on signature verification inside emergentintegrations.handle_webhook. Ensure STRIPE_WEBHOOK_SECRET (or equivalent) is configured in production env — currently only STRIPE_API_KEY is in /app/backend/.env. With sk_test_emergent the webhook may be a no-op."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_stripe_checkout.py (new)",
+    "/app/test_reports/iteration_3.json (new)",
+    "/app/test_reports/pytest/stripe_checkout_results.xml (new)"
+  ],
+  "success_rate": {"backend": "95.5% (21/22)", "frontend": "not tested per request — backend-only iteration"},
+  "seed_data_creation": "Reused tester@goalpilot.ai / Test@1234. 5 payment_transactions rows created (4 packages + 1 client-override-attempt) and left in DB with status=open. No real card was entered, so they remain in 'initiated' state and are inert. Reset user.plan back to free/monthly at end of run.",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Run with env: EXPO_PUBLIC_BACKEND_URL=https://goal-pilot-ai.preview.emergentagent.com, MONGO_URL=mongodb://localhost:27017, DB_NAME=goalpilot_db. pytest /app/backend/tests/test_stripe_checkout.py -v. Stripe checkout *creation* succeeds (real https://checkout.stripe.com URL is returned and Mongo row is correct), so the failure is isolated to the *status retrieval* path — likely a config asymmetry between the two StripeCheckout instances. If the main agent fixes by, e.g., catching CheckoutError and returning the locally stored tx, the test test_checkout_status_for_real_session_returns_pending_or_open will go green. After fix, also try GET /api/checkout/status/{session_id} for an explicitly cancelled or expired session to verify the retry/poll behavior used by /payment/success.",
+  "rca_of_issue": "RCA — POST /api/checkout/session is logged at backend as: 'INFO:stripe: Request to Stripe api method=post url=https://integrations.emergentagent.com/stripe/v1/checkout/sessions response_code=200', confirming creation goes through Emergent's proxy. The returned session_id (cs_test_xxx) is genuinely usable on the live https://checkout.stripe.com hosted page (URL in body confirms). But the subsequent GET /api/checkout/status/{session_id} raises CheckoutError 'No such checkout.session' from the underlying stripe library — meaning StripeCheckout.get_checkout_status() in emergentintegrations is NOT routing through integrations.emergentagent.com proxy (probably because webhook_url is empty in the retrieval-time constructor or because the lib only proxies create, not retrieve). Reproduction: login → POST /api/checkout/session {package_id=pro_monthly, origin_url=https://x.com} → take session_id → GET /api/checkout/status/<session_id> → 500. Mitigation options: (a) have the main agent verify with Emergent integrations team whether get_checkout_status supports the proxy; (b) add try/except in server.py to fall back to the locally stored tx state and return payment_status='unpaid'/status='open' on CheckoutError; (c) rely on the /api/webhook/stripe path to update payment_status and have status endpoint just read Mongo — eliminating the upstream Stripe call for unpaid/open sessions."
+}

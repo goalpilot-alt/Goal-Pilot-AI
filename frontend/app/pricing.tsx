@@ -1,16 +1,17 @@
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, Platform, Linking } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
+import * as WebBrowser from 'expo-web-browser';
 import { colors, spacing, radii } from '../src/theme';
 import { api } from '../src/api';
 import { useAuth } from '../src/AuthContext';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 type Cycle = 'monthly' | 'annual';
 
 const PLANS: Array<{
-  key: string;
+  key: 'free' | 'pro' | 'coach';
   name: string;
   monthly: string;
   annual: string;
@@ -20,55 +21,74 @@ const PLANS: Array<{
   features: string[];
   cta: string;
 }> = [
-  {
-    key: 'free',
-    name: 'Free',
-    monthly: '$0',
-    annual: '$0',
-    annualTotal: '$0',
-    save: null,
-    features: ['1 active goal', 'Basic AI plan', 'Manual tracking', 'Basic reminders'],
-    cta: 'Current',
-  },
-  {
-    key: 'pro',
-    name: 'Pro',
-    monthly: '$12',
-    annual: '$9',
-    annualTotal: '$108/yr',
-    save: 'Save $36',
-    highlight: true,
-    features: ['Up to 5 goals', 'AI goal breakdown', 'Smart reminders', 'Calendar integration', 'Weekly AI review'],
-    cta: 'Upgrade to Pro',
-  },
-  {
-    key: 'coach',
-    name: 'Coach',
-    monthly: '$29',
-    annual: '$21',
-    annualTotal: '$252/yr',
-    save: 'Save $96',
-    features: ['Unlimited goals', 'Daily AI coaching', 'Advanced insights', 'Accountability mode', 'Priority automation'],
-    cta: 'Upgrade to Coach',
-  },
+  { key: 'free', name: 'Free', monthly: '$0', annual: '$0', annualTotal: '$0', save: null, features: ['1 active goal', 'Basic AI plan', 'Manual tracking', 'Basic reminders'], cta: 'Current' },
+  { key: 'pro', name: 'Pro', monthly: '$12', annual: '$9', annualTotal: '$108/yr', save: 'Save $36', highlight: true, features: ['Up to 5 goals', 'AI goal breakdown', 'Smart reminders', 'Calendar integration', 'Weekly AI review'], cta: 'Upgrade to Pro' },
+  { key: 'coach', name: 'Coach', monthly: '$29', annual: '$21', annualTotal: '$252/yr', save: 'Save $96', features: ['Unlimited goals', 'Daily AI coaching', 'Advanced insights', 'Accountability mode', 'Priority automation'], cta: 'Upgrade to Coach' },
 ];
+
+const BACKEND_BASE = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
 export default function Pricing() {
   const router = useRouter();
+  const params = useLocalSearchParams<{ session_id?: string }>();
   const { user, refreshUser } = useAuth();
   const [busy, setBusy] = useState<string | null>(null);
   const [cycle, setCycle] = useState<Cycle>('annual');
   const current = user?.plan || 'free';
 
-  async function upgrade(plan: string) {
+  // If returning from Stripe with session_id (web flow), poll status here.
+  useEffect(() => {
+    if (!params?.session_id) return;
+    let cancelled = false;
+    let attempts = 0;
+    const poll = async () => {
+      while (!cancelled && attempts < 8) {
+        attempts += 1;
+        try {
+          const { data } = await api.get(`/checkout/status/${params.session_id}`);
+          if (data.payment_status === 'paid') {
+            await refreshUser();
+            Alert.alert('Payment confirmed', `Welcome to ${(data.plan || '').toUpperCase()} (${data.billing})!`);
+            return;
+          }
+          if (data.status === 'expired') {
+            Alert.alert('Session expired', 'Your checkout session expired. Please try again.');
+            return;
+          }
+        } catch {}
+        await new Promise(r => setTimeout(r, 2000));
+      }
+    };
+    poll();
+    return () => { cancelled = true; };
+  }, [params?.session_id]);
+
+  function getOriginUrl(): string {
+    if (Platform.OS === 'web' && typeof window !== 'undefined') return window.location.origin;
+    return BACKEND_BASE; // mobile uses preview URL as origin so success returns to web preview
+  }
+
+  async function startCheckout(plan: 'pro' | 'coach') {
     if (plan === current) return;
     setBusy(plan);
     try {
-      await api.post(`/subscription/upgrade?plan=${plan}&billing=${cycle}`);
-      await refreshUser();
-      Alert.alert('Welcome aboard', `You're on ${plan.toUpperCase()} (${cycle}). Stripe checkout is MOCKED for MVP.`);
-    } catch {
-      Alert.alert('Oops', 'Could not complete upgrade.');
+      const package_id = `${plan}_${cycle}`;
+      const { data } = await api.post('/checkout/session', { package_id, origin_url: getOriginUrl() });
+      const checkoutUrl: string = data.url;
+      const sessionId: string = data.session_id;
+
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        window.location.href = checkoutUrl;
+        return;
+      }
+
+      // Native: open Stripe Checkout in in-app browser
+      const result = await WebBrowser.openAuthSessionAsync(checkoutUrl, `${BACKEND_BASE}/payment/success`);
+      // Regardless of how the user returns, navigate to success screen and let it poll.
+      router.push({ pathname: '/payment/success', params: { session_id: sessionId } });
+    } catch (e: any) {
+      const d = e?.response?.data?.detail;
+      Alert.alert('Checkout failed', typeof d === 'string' ? d : 'Could not start checkout.');
     } finally { setBusy(null); }
   }
 
@@ -84,18 +104,10 @@ export default function Pricing() {
         <Text style={styles.sub}>Cancel anytime. 7-day free trial on Pro & Coach.</Text>
 
         <View style={styles.toggleWrap}>
-          <TouchableOpacity
-            testID="pricing-toggle-monthly"
-            style={[styles.toggleSeg, cycle === 'monthly' && styles.toggleSegActive]}
-            onPress={() => setCycle('monthly')}
-          >
+          <TouchableOpacity testID="pricing-toggle-monthly" style={[styles.toggleSeg, cycle === 'monthly' && styles.toggleSegActive]} onPress={() => setCycle('monthly')}>
             <Text style={[styles.toggleText, cycle === 'monthly' && styles.toggleTextActive]}>Monthly</Text>
           </TouchableOpacity>
-          <TouchableOpacity
-            testID="pricing-toggle-annual"
-            style={[styles.toggleSeg, cycle === 'annual' && styles.toggleSegActive]}
-            onPress={() => setCycle('annual')}
-          >
+          <TouchableOpacity testID="pricing-toggle-annual" style={[styles.toggleSeg, cycle === 'annual' && styles.toggleSegActive]} onPress={() => setCycle('annual')}>
             <Text style={[styles.toggleText, cycle === 'annual' && styles.toggleTextActive]}>Annual</Text>
             <View style={styles.saveBadge}><Text style={styles.saveBadgeText}>-25%</Text></View>
           </TouchableOpacity>
@@ -105,14 +117,8 @@ export default function Pricing() {
           const active = current === p.key;
           const price = cycle === 'annual' ? p.annual : p.monthly;
           return (
-            <View
-              key={p.key}
-              style={[styles.card, p.highlight && styles.cardHighlight, active && styles.cardActive]}
-              testID={`plan-card-${p.key}`}
-            >
-              {p.highlight && (
-                <View style={styles.popular}><Text style={styles.popularText}>MOST POPULAR</Text></View>
-              )}
+            <View key={p.key} style={[styles.card, p.highlight && styles.cardHighlight, active && styles.cardActive]} testID={`plan-card-${p.key}`}>
+              {p.highlight && <View style={styles.popular}><Text style={styles.popularText}>MOST POPULAR</Text></View>}
               <Text style={styles.planName}>{p.name}</Text>
               <View style={styles.priceRow}>
                 <Text style={styles.price}>{price}</Text>
@@ -131,20 +137,20 @@ export default function Pricing() {
                 </View>
               ))}
               <TouchableOpacity
-                disabled={active || busy !== null}
+                disabled={active || busy !== null || p.key === 'free'}
                 style={[styles.cta, active && styles.ctaActive, p.highlight && !active && styles.ctaPrimary]}
-                onPress={() => upgrade(p.key)}
+                onPress={() => p.key !== 'free' && startCheckout(p.key)}
                 testID={`plan-cta-${p.key}`}
               >
                 <Text style={[styles.ctaText, p.highlight && !active && { color: '#fff' }, active && { color: colors.textSecondary }]}>
-                  {active ? 'Current plan' : busy === p.key ? 'Processing…' : p.cta}
+                  {active ? 'Current plan' : busy === p.key ? 'Starting checkout…' : p.cta}
                 </Text>
               </TouchableOpacity>
             </View>
           );
         })}
 
-        <Text style={styles.note}>Stripe payment flow is MOCKED for this MVP. Enabling real checkout requires Stripe keys.</Text>
+        <Text style={styles.note}>Secured by Stripe · Test mode</Text>
       </ScrollView>
     </SafeAreaView>
   );
