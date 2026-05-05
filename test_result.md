@@ -214,6 +214,18 @@ backend:
         comment: "All 8 live-backend assertions PASS against https://goal-pilot-ai.preview.emergentagent.com/api. (1) GET /api/notifications/prefs without token -> 401. (2) Fresh user (notif_fresh_<uuid>@goalpilot.ai, registered on-the-fly) GET returns exactly {'morning': True, 'streak': True}. (3) PATCH {'morning': false} -> 200 {'morning': false, 'streak': true}; subsequent GET confirms persistence. (4) PATCH {'streak': false} (on user now with morning=false) -> 200 {'morning': false, 'streak': false} (partial merge retained morning=false). (5) PATCH {'morning': true, 'streak': true} -> 200 defaults restored. (6) PATCH with empty body {} -> 200 and returns current prefs unchanged {'morning': true, 'streak': true}. (7) PATCH without Authorization header -> 401. Scheduler integration verified via direct async call to services.scheduler._build_user_message: user with {'morning': False, 'streak': False} returned None; user with {'morning': True, 'streak': False} and no history also returned None (streak_start correctly gated by streak_on); user with both True + no history returned a streak_start push message. notification_prefs is correctly wired end-to-end into the daily push job."
 
 frontend:
+  - task: "Notification preferences (GET/PATCH /api/notifications/prefs + scheduler gating)"
+    implemented: true
+    working: true
+    file: "/app/backend/routes/notifications.py + /app/backend/services/scheduler.py + /app/frontend/app/settings/notifications.tsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "Added user.notification_prefs = {morning: bool, streak: bool} (default true/true). Endpoints: GET returns current prefs (defaults applied); PATCH does partial merge (only updates fields present in body). Scheduler _build_user_message now skips users where both prefs are false (returns None), and gates streak_start/streak_day/streak_back behind streak_on, and morning summary behind morning_on. Frontend: new modal screen /settings/notifications with two RN <Switch>es bound to backend; reachable from Profile > Smart Reminders > chevron. Verified end-to-end: PATCH 200 OK, switches persist across reload. Backend testing agent ran 8 assertions including direct scheduler invocation \u2014 all pass."
+
   - task: "Vector icons font preload (fixes squared icon glyphs)"
     implemented: true
     working: true
