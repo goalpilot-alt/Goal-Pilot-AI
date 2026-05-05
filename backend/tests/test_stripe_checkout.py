@@ -170,18 +170,79 @@ def test_checkout_status_invalid_session_404(s):
 
 
 def test_checkout_status_for_real_session_returns_pending_or_open(s):
+    """After fix: even if upstream Stripe lookup fails (proxy-issued session),
+    endpoint must 200 with local fallback (payment_status=initiated, status=open,
+    amount_total=cents-from-package, currency, plan, billing)."""
     sessions = state.get("sessions", {})
     assert sessions, "needs at least one created session"
-    sess_id = next(iter(sessions.values()))
+    # Use pro_monthly so we know the expected amount_total deterministically
+    pkg_id = "pro_monthly"
+    sess_id = sessions[pkg_id]
+    r = s.get(f"{API}/checkout/status/{sess_id}", headers=state["headers"])
+    assert r.status_code == 200, f"expected 200 (fallback), got {r.status_code}: {r.text}"
+    data = r.json()
+    # Required keys
+    for k in ("payment_status", "status", "amount_total", "currency", "plan", "billing"):
+        assert k in data, f"missing key {k} in response: {data}"
+    # No card has been entered, so payment_status should not be 'paid'
+    assert data["payment_status"] != "paid", f"unexpected paid status: {data}"
+    # On Stripe-failure fallback we expect initiated/open from local row
+    assert data["payment_status"] in ("initiated", "unpaid", "open"), data["payment_status"]
+    assert data["status"] in ("open", "complete", "expired"), data["status"]
+    # amount_total must be cents from PACKAGES (12.00 -> 1200)
+    expected_cents = int(PACKAGES_EXPECTED[pkg_id]["amount"] * 100)
+    assert data["amount_total"] == expected_cents, (
+        f"amount_total mismatch: got {data['amount_total']} expected {expected_cents}"
+    )
+    assert data["currency"] == "usd"
+    assert data["plan"] == PACKAGES_EXPECTED[pkg_id]["plan"]
+    assert data["billing"] == PACKAGES_EXPECTED[pkg_id]["billing"]
+
+
+def test_checkout_status_idempotent_when_already_paid(s):
+    """If tx.payment_status is already 'paid' in mongo, endpoint must return paid
+    WITHOUT calling Stripe. We force the row to paid then call the endpoint."""
+    sessions = state.get("sessions", {})
+    assert sessions, "needs at least one created session"
+    pkg_id = "coach_monthly"
+    sess_id = sessions[pkg_id]
+
+    async def _flip_paid():
+        client = AsyncIOMotorClient(MONGO_URL)
+        try:
+            res = await client[DB_NAME].payment_transactions.update_one(
+                {"session_id": sess_id},
+                {"$set": {"payment_status": "paid", "status": "complete"}},
+            )
+            assert res.matched_count == 1, f"no tx for {sess_id}"
+        finally:
+            client.close()
+
+    asyncio.get_event_loop().run_until_complete(_flip_paid())
+
     r = s.get(f"{API}/checkout/status/{sess_id}", headers=state["headers"])
     assert r.status_code == 200, r.text
     data = r.json()
-    assert "payment_status" in data
-    assert "status" in data
-    # No card has been entered, so payment_status should not be 'paid'
-    assert data["payment_status"] != "paid"
-    assert data.get("plan") in ("pro", "coach")
-    assert data.get("billing") in ("monthly", "annual")
+    assert data["payment_status"] == "paid", data
+    assert data["status"] == "complete", data
+    expected_cents = int(PACKAGES_EXPECTED[pkg_id]["amount"] * 100)
+    assert data["amount_total"] == expected_cents
+    assert data["currency"] == "usd"
+    assert data["plan"] == PACKAGES_EXPECTED[pkg_id]["plan"]
+    assert data["billing"] == PACKAGES_EXPECTED[pkg_id]["billing"]
+
+    # Reset row so cleanup test still works and we don't accidentally upgrade plan
+    async def _reset():
+        client = AsyncIOMotorClient(MONGO_URL)
+        try:
+            await client[DB_NAME].payment_transactions.update_one(
+                {"session_id": sess_id},
+                {"$set": {"payment_status": "initiated", "status": "open"}},
+            )
+        finally:
+            client.close()
+
+    asyncio.get_event_loop().run_until_complete(_reset())
 
 
 # ---------- Regression: existing endpoints still healthy ----------

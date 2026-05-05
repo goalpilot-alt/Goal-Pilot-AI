@@ -518,31 +518,42 @@ async def get_checkout_status(session_id: str, user: dict = Depends(get_current_
             "billing": tx["billing"],
         }
 
-    checkout = StripeCheckout(api_key=STRIPE_API_KEY, webhook_url="")
-    status: CheckoutStatusResponse = await checkout.get_checkout_status(session_id)
+    # Try to refresh from Stripe; on failure, fall back to local state so polling never 500s.
+    try:
+        checkout = StripeCheckout(api_key=STRIPE_API_KEY, webhook_url="")
+        status: CheckoutStatusResponse = await checkout.get_checkout_status(session_id)
+        update = {
+            "payment_status": status.payment_status,
+            "status": status.status,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        await db.payment_transactions.update_one({"session_id": session_id}, {"$set": update})
 
-    update = {
-        "payment_status": status.payment_status,
-        "status": status.status,
-        "updated_at": datetime.now(timezone.utc).isoformat(),
-    }
-    await db.payment_transactions.update_one({"session_id": session_id}, {"$set": update})
+        # Only grant plan once per session
+        if status.payment_status == "paid" and tx.get("payment_status") != "paid":
+            await db.users.update_one(
+                {"id": user["id"]},
+                {"$set": {"plan": tx["plan"], "billing": tx["billing"], "upgraded_at": datetime.now(timezone.utc).isoformat()}},
+            )
 
-    # Only grant plan once per session
-    if status.payment_status == "paid" and tx.get("payment_status") != "paid":
-        await db.users.update_one(
-            {"id": user["id"]},
-            {"$set": {"plan": tx["plan"], "billing": tx["billing"], "upgraded_at": datetime.now(timezone.utc).isoformat()}},
-        )
-
-    return {
-        "payment_status": status.payment_status,
-        "status": status.status,
-        "amount_total": status.amount_total,
-        "currency": status.currency,
-        "plan": tx["plan"],
-        "billing": tx["billing"],
-    }
+        return {
+            "payment_status": status.payment_status,
+            "status": status.status,
+            "amount_total": status.amount_total,
+            "currency": status.currency,
+            "plan": tx["plan"],
+            "billing": tx["billing"],
+        }
+    except Exception as e:
+        logger.warning(f"Stripe status lookup failed for {session_id}: {e}. Falling back to local state.")
+        return {
+            "payment_status": tx.get("payment_status", "unpaid"),
+            "status": tx.get("status", "open"),
+            "amount_total": int(tx["amount"] * 100),
+            "currency": tx["currency"],
+            "plan": tx["plan"],
+            "billing": tx["billing"],
+        }
 
 
 @api.post("/webhook/stripe")

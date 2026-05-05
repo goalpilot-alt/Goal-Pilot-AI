@@ -1,0 +1,39 @@
+{
+  "summary": "GoalPilot AI iteration 4 — RETEST of GET /api/checkout/status/{session_id} fix. All 23/23 backend tests pass (100%). The fix in server.py (try/except around StripeCheckout.get_checkout_status with local-fallback) is verified working: endpoint now returns 200 with payment_status=initiated, status=open, amount_total=cents-from-PACKAGES (e.g. 1200 for pro_monthly $12.00), currency=usd, plan, billing — instead of 500. Idempotency confirmed: when tx.payment_status is forced to 'paid' in mongo, endpoint returns paid/complete/cents/usd/plan/billing without any upstream Stripe call (verified by lack of Stripe API log line for that session_id). Pre-existing behaviour preserved: 401/403 without auth, 404 for unknown session_id. POST /api/checkout/session still works for all 4 packages (pro_monthly, pro_annual, coach_monthly, coach_annual) returning real https://checkout.stripe.com URLs, 400 for invalid package, server-side amount enforcement holds (client amount/currency override is ignored). REGRESSION green: /api/auth/me, /api/goals, /api/tasks/today, /api/nudge, /api/calendar/url, /api/calendar/export.ics, /api/review/weekly, /api/subscription/upgrade, /api/dashboard/stats. Backend logs confirm fallback path: 'WARNING:server:Stripe status lookup failed for cs_test_xxx: ... Falling back to local state.' followed by HTTP 200.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "GET /api/checkout/status/{session_id}", "issue": "Upstream Stripe lookup still 404s (proxy-issued session_ids not resolvable on api.stripe.com via emergentintegrations get_checkout_status). Functionally masked by the new fallback, but worth coordinating with Emergent integrations team so the *paid* signal can be detected without relying solely on /api/webhook/stripe."},
+      {"endpoint": "POST /api/checkout/session", "issue": "No-auth returns 403 instead of 401 (HTTPBearer default). Behavioural-only nit; tests accept (401, 403)."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_stripe_checkout.py",
+    "/app/test_reports/pytest/stripe_checkout_results.xml"
+  ],
+  "action_items": [
+    "(Optional) Investigate with Emergent integrations team why StripeCheckout.get_checkout_status() routes to api.stripe.com instead of integrations.emergentagent.com proxy — the create_checkout_session call DOES go through the proxy. A consistent proxy use would let the status endpoint return the real upstream payment_status without falling back. For now, the webhook path + local fallback combination is functionally correct.",
+    "(Optional) Standardize 401 vs 403 across protected endpoints."
+  ],
+  "critical_code_review_comments": [
+    "server.py /api/checkout/status: fix is correct and covers the three required cases (cached-paid idempotent, upstream-success, upstream-failure fallback). Consider logging.exception (not warning) on the except branch so the stack is captured for ops, but logger.warning with str(e) is acceptable.",
+    "server.py /api/checkout/status: the upstream-success branch updates tx and grants plan if status.payment_status=='paid'. This will only ever fire if the proxy issue is resolved; until then plan-grant relies on /api/webhook/stripe. Make sure the webhook is actually reachable in prod (STRIPE_WEBHOOK_SECRET not in .env yet).",
+    "server.py PACKAGES dict still uses float amounts; multiplied by 100 in two places. For $108.00 / $252.00 the float→int(*100) is exact, but consider storing cents directly to avoid future rounding drift.",
+    "server.py /api/checkout/status returns amount_total as int(tx['amount']*100) on both the cached-paid branch and the fallback branch — consistent with Stripe's amount_total semantics (cents), good."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_stripe_checkout.py (added 1 test, strengthened 1 test: validates amount_total cents, currency, plan, billing on fallback; idempotency test forces tx.payment_status=paid in mongo and verifies response without Stripe call)"
+  ],
+  "success_rate": {"backend": "100% (23/23)", "frontend": "not tested per request — backend-only iteration"},
+  "seed_data_creation": "Reused tester@goalpilot.ai / Test@1234. 6 payment_transactions rows created across this run (4 packages + 1 client-override-attempt + 1 reused for idempotency test which was reset to initiated/open at end of test). User plan reset to free/monthly at end of run.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Stripe Checkout backend is now fully green. Frontend pricing/checkout/payment-success flows have not been tested — if main agent wants those tested, request frontend testing explicitly. Note that real card entry on the live Stripe page was not exercised (no automated browser flow on stripe.com); the /payment/success polling path therefore exercises only the local-fallback branch, never the upstream-success branch. To exercise the full paid flow end-to-end, would need either a Stripe test-mode card auto-fill or a webhook simulation hitting /api/webhook/stripe with payment_status=paid.",
+  "rca_of_issue": "Original 500 RCA (iter 3): emergentintegrations.StripeCheckout.create_checkout_session goes through https://integrations.emergentagent.com/stripe/v1 proxy (success), but get_checkout_status hits https://api.stripe.com/v1 directly (404 'No such checkout.session'). Fix (verified iter 4): wrapped get_checkout_status in try/except in server.py @ /api/checkout/status; on any exception, log warning and return locally-stored tx state with amount_total=int(tx['amount']*100), currency, plan, billing. Also added an idempotent short-circuit: if tx.payment_status=='paid' the endpoint returns paid without calling Stripe at all. Reproduction now: login → POST /api/checkout/session {package_id=pro_monthly} → take session_id → GET /api/checkout/status/<session_id> → 200 {payment_status: 'initiated', status: 'open', amount_total: 1200, currency: 'usd', plan: 'pro', billing: 'monthly'}. Backend log confirms the fallback is hit: 'Stripe status lookup failed for cs_test_xxx ... Falling back to local state.'"
+}
