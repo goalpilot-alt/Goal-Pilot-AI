@@ -108,6 +108,51 @@ user_problem_statement: |
   for robust async plan upgrades and idempotent transaction handling.
 
 backend:
+  - task: "APScheduler daily push job (Expo Push API)"
+    implemented: true
+    working: true
+    file: "/app/backend/services/scheduler.py, /app/backend/services/push.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "AsyncIOScheduler started in app startup, runs daily at 09:00 UTC (configurable via PUSH_DAILY_HOUR_UTC env). Job iterates push_tokens.distinct user_ids, picks ONE message per user (streak-start | streak-day | streak-back | morning-summary). Localized templates for en-US/es/fr/zh-CN with en-US fallback. Posts to https://exp.host/--/api/v2/push/send via httpx. Skips users with no tokens or nothing-to-say. Verified locally: scheduler logs 'Scheduler started: daily push at 09:00 UTC' on startup; manual run sends to Expo (HTTP 200) and writes to db.push_log."
+      - working: true
+        agent: "testing"
+        comment: "Scheduler wiring verified WITHOUT triggering job. grep '/var/log/supervisor/backend.err.log' for 'Scheduler started: daily push at 09:00 UTC' returned 3 matches across recent backend restarts (line emitted from services/scheduler.start_scheduler at startup). API root /api/ still serves 200 with {status:'ok'}, confirming scheduler init did not break FastAPI startup. Did NOT manually trigger daily_push_job (per instruction to avoid sending real Expo pushes). Code review confirms: AsyncIOScheduler with CronTrigger(hour=9, minute=0, timezone='UTC'), idempotent start, and proper shutdown hook in server.on_shutdown."
+
+  - task: "Backend modular refactor (routes/, services/, core/, models/)"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py + /app/backend/routes/*.py + /app/backend/services/*.py + /app/backend/core/*.py + /app/backend/models/schemas.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "server.py reduced from 847 lines to 70 lines — only mounts routers and lifecycle hooks. New layout: core/{config,db,auth} (env, mongo, jwt+bcrypt+get_current_user), models/schemas.py (pydantic), services/{ai,push,scheduler,stripe,calendar_ics} (business logic), routes/{auth,goals,tasks,dashboard,nudge,checkout,calendar,notifications}.py (HTTP layer). All 59 existing tests still pass; ruff lint clean."
+      - working: true
+        agent: "testing"
+        comment: "Full smoke regression executed against live backend with a fresh user (smoke_<uuid>@goalpilot.ai). 18/18 smoke endpoints returned expected status codes: POST /api/auth/register 200, POST /api/auth/login 200 with token, GET /api/auth/me 200 (plan=free), POST /api/auth/locale {locale:'es'} 200 + persisted, POST /api/goals 200 (full plan with summary/milestones/weekly_plan/daily_tasks; 7 tasks created), GET /api/goals 200 list, GET /api/goals/{id} 200, GET /api/tasks 200 (count=7), PATCH /api/tasks/{id} {completed:true} 200, GET /api/tasks/missed 200, GET /api/dashboard/stats 200 (streak/today_done/today_total/active_goals/total_completed/missed all present, streak=1 after task complete), GET /api/nudge 200, GET /api/review/weekly 200 (completion_rate + AI summary 266 chars), GET /api/calendar/url 200 with token, GET /api/calendar/export.ics?token=... 200 with content-type text/calendar (2285 bytes), POST /api/checkout/session {package_id:'pro_monthly', origin_url:'https://example.com'} 200 with url + session_id, POST /api/webhook/stripe with bad signature returns 400 'Invalid webhook' as expected, DELETE /api/goals/{id} 200 with {ok:true}. Modular refactor preserves all behavior."
+
+  - task: "Idempotency-Key support on POST /api/goals (X-Idempotency-Key header)"
+    implemented: true
+    working: true
+    file: "/app/backend/routes/goals.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "Optional X-Idempotency-Key header. On first request with key, creates goal as usual + caches { user_id, key, status_code, response, created_at } in db.idempotency_keys. On replay within 24h with same (user_id, key), replays cached response (200) — including idempotent 402 plan-cap responses. TTL index on created_at expires after 26h. Verified with new tests/test_idempotency_scheduler.py (3 tests: replay-200, replay-402, health). Different key -> not idempotent (correct)."
+      - working: true
+        agent: "testing"
+        comment: "End-to-end verified against live backend with a fresh user (idem_<uuid>@goalpilot.ai) to avoid pollution. (1) Replay-200: POST /api/goals with X-Idempotency-Key=K1 created goal id=87fed5dd; immediate retry with same body and same K1 returned the IDENTICAL goal id (cache replay, not a new goal). Backend logs confirm 'Idempotent goal replay for user=... key=...'. (2) No-key path: a third call WITHOUT idempotency key correctly returned 402 'Free plan allows 1 active goal. Upgrade to Pro for up to 5.' confirming the cap still enforces. (3) Replay-402: POST with new key K2 returned 402 (plan cap reached); retry with same K2 also returned 402 (idempotent error replay). (4) Mongo spot check: idempotency_keys collection contains both rows — K1 row has {user_id, key, status_code:200, response, created_at}; K2 row has {user_id, key, status_code:402, detail, created_at}. All 7 idempotency assertions passed."
+
   - task: "POST /api/auth/locale endpoint to persist user's preferred language"
     implemented: true
     working: true
@@ -227,20 +272,27 @@ agent_communication:
       - /api/webhook/stripe returns 400 on bad signature; 200 + idempotent on already-paid session.
   - agent: "testing"
     message: |
-      All 3 high-priority backend tasks PASS plus full regression on existing endpoints. Created /app/backend_test.py
-      with 13 assertions; all 13 passed against the live preview backend.
+      All 27 backend assertions PASS against live preview backend.
       
-      1) POST /api/auth/locale: 8/8 supported locales -> 200; xx/de/'' -> 400 'Unsupported locale'; missing auth -> 401;
-         locale persisted in user document (verified via /api/auth/me returning user.locale='es').
-      2) AI plan localization: After setting locale=es and POST /api/goals (Aprender a tocar guitarra), plan.summary
-         came back fully in Spanish with accented characters and Spanish-only vocabulary. Localization confirmed working.
-      3) /api/webhook/stripe: bad signature returns 400 'Invalid webhook' consistently; backend logs show clear
-         'Stripe webhook validation error' messages. Inserted a paid payment_transactions doc directly in Mongo, then
-         repeatedly posted invalid webhook payloads — user's plan was unchanged before/after, confirming no
-         unintended writes. NOTE: STRIPE_WEBHOOK_SECRET is empty in /app/backend/.env, so the success/idempotent-200
-         path could not be exercised end-to-end. Recommend setting STRIPE_WEBHOOK_SECRET in the live env to enable
-         full success-path verification with real Stripe signed events. Code paths look correct.
-      4) Regression: /api/auth/login, /api/auth/me, /api/goals (GET), /api/dashboard/stats, /api/nudge, /api/review/weekly
-         all returned 200 with correct payloads.
+      Section 1 — Modular refactor smoke regression (fresh user smoke_<uuid>@goalpilot.ai): 18/18
+      endpoints OK with expected status codes (register, login, /me, /auth/locale es, POST/GET/DELETE
+      /goals, GET /goals/{id}, GET /tasks, PATCH /tasks/{id}, /tasks/missed, /dashboard/stats with
+      streak/today/active_goals, /nudge, /review/weekly with AI summary, /calendar/url + /calendar/export.ics
+      text/calendar 2285 bytes, /checkout/session pro_monthly returns url+session_id, /webhook/stripe
+      bad sig -> 400, DELETE /goals/{id}). Modular refactor preserves all behavior.
       
-      No critical issues. Recommend main agent finalize and ship.
+      Section 2 — Idempotency-Key on POST /api/goals (fresh user idem_<uuid>): 7/7 assertions PASS.
+      (1) First call with K1 -> 200 + new goal. (2) Same body+K1 retry -> 200, IDENTICAL goal id (replay,
+      not duplicate). Backend logged 'Idempotent goal replay for user=... key=...'. (3) No-key second
+      call -> 402 (free plan cap). (4) New key K2 first call -> 402 (cap reached). (5) Same K2 retry
+      -> 402 (idempotent error replay). (6) Mongo db.idempotency_keys has both rows: K1 with
+      status_code=200/response/created_at; K2 with status_code=402/detail/created_at.
+      
+      Section 3 — APScheduler daily push job: NOT triggered (per instructions). Verified wiring via
+      grep on backend.err.log: 'Scheduler started: daily push at 09:00 UTC' present (3 matches across
+      restarts). API root /api/ returns 200, confirming scheduler init does not break startup.
+      
+      No critical issues. STRIPE_WEBHOOK_SECRET still empty in backend/.env (previously noted) — the
+      success path of webhook idempotency cannot be exercised end-to-end without a real signed event,
+      but bad-signature path correctly returns 400 and no state mutation. All 3 current_focus tasks
+      now marked working: true; current_focus cleared. Recommend main agent finalize and ship.

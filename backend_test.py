@@ -1,377 +1,397 @@
-"""GoalPilot AI Backend Tests
-Focus: /api/auth/locale, AI plan localization, /api/webhook/stripe, regression on core endpoints.
+"""GoalPilot AI Backend Tests — focus on the 3 current_focus tasks:
+
+1. Idempotency-Key support on POST /api/goals (X-Idempotency-Key header)
+2. APScheduler daily push job — verify wired (do NOT trigger)
+3. Backend modular refactor — full smoke regression on all main endpoints
 """
-import os
-import sys
 import json
-import uuid
+import os
+import re
+import subprocess
 import time
-import requests
+import uuid
+import asyncio
 from pathlib import Path
 
-# Read backend URL from frontend/.env
+import requests
+
+# ---------------------------------------------------------------------------
+# Setup
+# ---------------------------------------------------------------------------
 ENV_FILE = Path("/app/frontend/.env")
 BACKEND_URL = None
 for line in ENV_FILE.read_text().splitlines():
     if line.startswith("EXPO_PUBLIC_BACKEND_URL="):
         BACKEND_URL = line.split("=", 1)[1].strip().strip('"').strip("'")
         break
-
 assert BACKEND_URL, "EXPO_PUBLIC_BACKEND_URL not set"
 API = f"{BACKEND_URL}/api"
-print(f"Testing backend at: {API}")
-
-EMAIL = "tester@goalpilot.ai"
-PASSWORD = "Test@1234"
-NAME = "Tester"
+print(f"Testing backend at: {API}\n")
 
 results = {"passed": [], "failed": [], "warnings": []}
 
 
-def record_pass(name, info=""):
-    print(f"PASS: {name} {info}")
-    results["passed"].append((name, info))
+def ok(name, msg=""):
+    results["passed"].append(name)
+    print(f"  PASS  {name}{(' — ' + msg) if msg else ''}")
 
 
-def record_fail(name, info=""):
-    print(f"FAIL: {name} {info}")
-    results["failed"].append((name, info))
+def fail(name, msg):
+    results["failed"].append((name, msg))
+    print(f"  FAIL  {name} — {msg}")
 
 
-def record_warn(name, info=""):
-    print(f"WARN: {name} {info}")
-    results["warnings"].append((name, info))
+def warn(name, msg):
+    results["warnings"].append((name, msg))
+    print(f"  WARN  {name} — {msg}")
 
 
-def auth_headers(token):
-    return {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+def hdr(token):
+    return {"Authorization": f"Bearer {token}"}
 
 
-# ---------- Setup user ----------
-def ensure_user():
-    # Try login first
-    r = requests.post(f"{API}/auth/login", json={"email": EMAIL, "password": PASSWORD}, timeout=30)
-    if r.status_code == 200:
-        return r.json()
-    # Else register
-    r = requests.post(f"{API}/auth/register", json={"email": EMAIL, "password": PASSWORD, "name": NAME}, timeout=30)
-    if r.status_code == 200:
-        return r.json()
-    if r.status_code == 400 and "already" in r.text.lower():
-        # password mismatch — just attempt login again
-        r2 = requests.post(f"{API}/auth/login", json={"email": EMAIL, "password": PASSWORD}, timeout=30)
-        if r2.status_code == 200:
-            return r2.json()
-    raise RuntimeError(f"Could not auth: {r.status_code} {r.text}")
+# ---------------------------------------------------------------------------
+# Section 1 — Smoke regression with fresh user (covers refactor)
+# ---------------------------------------------------------------------------
+print("=" * 72)
+print("SECTION 1 — Smoke regression (modular refactor)")
+print("=" * 72)
 
+uniq = uuid.uuid4().hex[:10]
+SMOKE_EMAIL = f"smoke_{uniq}@goalpilot.ai"
+SMOKE_PASSWORD = "Smoke@2026!"
+SMOKE_NAME = f"Smoke User {uniq[:4]}"
 
-auth_data = ensure_user()
-TOKEN = auth_data["token"]
-USER = auth_data["user"]
-USER_ID = USER["id"]
-print(f"Authenticated as user_id={USER_ID}")
+# 1.1 register
+r = requests.post(f"{API}/auth/register", json={
+    "email": SMOKE_EMAIL,
+    "password": SMOKE_PASSWORD,
+    "name": SMOKE_NAME,
+})
+if r.status_code == 200 and r.json().get("token"):
+    smoke_token = r.json()["token"]
+    smoke_user = r.json()["user"]
+    ok("POST /api/auth/register", f"user_id={smoke_user['id'][:8]}")
+else:
+    fail("POST /api/auth/register", f"{r.status_code} {r.text[:300]}")
+    raise SystemExit("Register failed — cannot continue regression")
 
+# 1.2 login
+r = requests.post(f"{API}/auth/login", json={"email": SMOKE_EMAIL, "password": SMOKE_PASSWORD})
+if r.status_code == 200 and r.json().get("token"):
+    smoke_token = r.json()["token"]  # use latest
+    ok("POST /api/auth/login", "token returned")
+else:
+    fail("POST /api/auth/login", f"{r.status_code} {r.text[:300]}")
 
-# =========================================================================
-# 1. POST /api/auth/locale
-# =========================================================================
-def test_locale_happy_paths():
-    locales = ["en-US", "en-GB", "es", "fr", "cs", "sk", "ru", "zh-CN"]
-    all_ok = True
-    for loc in locales:
-        r = requests.post(f"{API}/auth/locale", headers=auth_headers(TOKEN), json={"locale": loc}, timeout=15)
-        if r.status_code != 200:
-            record_fail(f"locale[{loc}]", f"expected 200 got {r.status_code} body={r.text}")
-            all_ok = False
-            continue
-        data = r.json()
-        if not (data.get("ok") is True and data.get("locale") == loc):
-            record_fail(f"locale[{loc}]", f"unexpected body {data}")
-            all_ok = False
-    if all_ok:
-        record_pass("POST /api/auth/locale happy paths (8 locales)")
-    return all_ok
+# 1.3 me
+r = requests.get(f"{API}/auth/me", headers=hdr(smoke_token))
+if r.status_code == 200 and r.json().get("email") == SMOKE_EMAIL:
+    ok("GET /api/auth/me", f"plan={r.json().get('plan')}")
+else:
+    fail("GET /api/auth/me", f"{r.status_code} {r.text[:200]}")
 
+# 1.4 set locale
+r = requests.post(f"{API}/auth/locale", json={"locale": "es"}, headers=hdr(smoke_token))
+if r.status_code == 200 and r.json().get("locale") == "es":
+    ok("POST /api/auth/locale", "locale=es persisted")
+else:
+    fail("POST /api/auth/locale", f"{r.status_code} {r.text[:200]}")
 
-def test_locale_unsupported():
-    fails = 0
-    for bad in ["xx", "de", ""]:
-        r = requests.post(f"{API}/auth/locale", headers=auth_headers(TOKEN), json={"locale": bad}, timeout=15)
-        if r.status_code != 400:
-            record_fail(f"locale[{bad!r}] expected 400", f"got {r.status_code} body={r.text}")
-            fails += 1
-            continue
-        if "Unsupported locale" not in r.text:
-            record_warn(f"locale[{bad!r}] 400 detail mismatch", r.text)
-    if fails == 0:
-        record_pass("POST /api/auth/locale unsupported -> 400")
-    return fails == 0
+# 1.5 create goal — should return plan
+goal_payload = {
+    "title": "Aprender fotograf\u00eda b\u00e1sica",
+    "deadline": "2026-12-31",
+    "motivation": "Capturar momentos en familia con calidad profesional",
+    "current_level": "beginner",
+    "hours_per_week": 4,
+}
+r = requests.post(f"{API}/goals", json=goal_payload, headers=hdr(smoke_token))
+goal_id = None
+if r.status_code == 200:
+    body = r.json()
+    goal_id = body.get("id")
+    if goal_id and isinstance(body.get("plan"), dict):
+        ok("POST /api/goals", f"id={goal_id[:8]} plan_keys={list(body['plan'].keys())}")
+    else:
+        fail("POST /api/goals", f"missing id or plan: {json.dumps(body)[:300]}")
+else:
+    fail("POST /api/goals", f"{r.status_code} {r.text[:300]}")
 
+# 1.6 list goals
+r = requests.get(f"{API}/goals", headers=hdr(smoke_token))
+if r.status_code == 200 and isinstance(r.json(), list):
+    ok("GET /api/goals", f"count={len(r.json())}")
+else:
+    fail("GET /api/goals", f"{r.status_code} {r.text[:200]}")
 
-def test_locale_no_auth():
-    r = requests.post(f"{API}/auth/locale", headers={"Content-Type": "application/json"}, json={"locale": "es"}, timeout=15)
-    # FastAPI HTTPBearer with auto_error=False raises 401 manually
-    if r.status_code in (401, 403):
-        record_pass(f"POST /api/auth/locale no auth -> {r.status_code}")
-        return True
-    record_fail("POST /api/auth/locale no auth", f"expected 401 got {r.status_code}")
-    return False
+# 1.7 get goal by id
+if goal_id:
+    r = requests.get(f"{API}/goals/{goal_id}", headers=hdr(smoke_token))
+    if r.status_code == 200 and r.json().get("id") == goal_id:
+        ok("GET /api/goals/{id}", "match")
+    else:
+        fail("GET /api/goals/{id}", f"{r.status_code} {r.text[:200]}")
 
+# 1.8 list tasks
+r = requests.get(f"{API}/tasks", headers=hdr(smoke_token))
+tasks = []
+if r.status_code == 200 and isinstance(r.json(), list):
+    tasks = r.json()
+    ok("GET /api/tasks", f"count={len(tasks)}")
+else:
+    fail("GET /api/tasks", f"{r.status_code} {r.text[:200]}")
 
-def test_locale_persistence_in_mongo():
-    # Set to es, then check via /auth/me whether locale field is present
-    r = requests.post(f"{API}/auth/locale", headers=auth_headers(TOKEN), json={"locale": "es"}, timeout=15)
-    if r.status_code != 200:
-        record_fail("locale persistence setup", r.text)
-        return False
-    me = requests.get(f"{API}/auth/me", headers=auth_headers(TOKEN), timeout=15)
-    if me.status_code != 200:
-        record_fail("locale persistence /auth/me", me.text)
-        return False
-    me_data = me.json()
-    if me_data.get("locale") != "es":
-        record_fail("locale persistence", f"/auth/me locale={me_data.get('locale')}")
-        return False
-    record_pass("locale persisted in user document (verified via /auth/me)")
-    return True
+# 1.9 patch a task -> completed:true
+if tasks:
+    t0_id = tasks[0]["id"]
+    r = requests.patch(f"{API}/tasks/{t0_id}", json={"completed": True}, headers=hdr(smoke_token))
+    if r.status_code == 200 and r.json().get("completed") is True:
+        ok("PATCH /api/tasks/{id}", "completed=true")
+    else:
+        fail("PATCH /api/tasks/{id}", f"{r.status_code} {r.text[:200]}")
+else:
+    warn("PATCH /api/tasks/{id}", "no tasks to patch (AI plan may have produced none)")
 
+# 1.10 missed
+r = requests.get(f"{API}/tasks/missed", headers=hdr(smoke_token))
+if r.status_code == 200 and isinstance(r.json(), list):
+    ok("GET /api/tasks/missed", f"count={len(r.json())}")
+else:
+    fail("GET /api/tasks/missed", f"{r.status_code} {r.text[:200]}")
 
-# =========================================================================
-# 2. AI plan localization
-# =========================================================================
-def looks_spanish(text: str) -> (bool, str):
-    if not text:
-        return False, "empty summary"
-    t = text.lower()
-    spanish_markers = ["á", "é", "í", "ó", "ú", "ñ", "¡", "¿"]
-    spanish_words = [" tu ", " para ", " semana", " plan", " que ", " con ", " los ", " las ", " es ", " una ", " del ", " por ", "objetivo", "meta", "guitarra", "aprender", "tocar"]
-    if any(m in t for m in spanish_markers):
-        hits = [m for m in spanish_markers if m in t]
-        return True, f"accents: {hits}"
-    if sum(1 for w in spanish_words if w in t) >= 2:
-        hits = [w.strip() for w in spanish_words if w in t]
-        return True, f"keywords: {hits}"
-    # English-only markers
-    english_markers = [" the ", " your ", " you ", " for ", " week", " goal", " practice", " learn"]
-    eh = [w.strip() for w in english_markers if w in t]
-    return False, f"no spanish markers; english-like markers: {eh}"
+# 1.11 dashboard stats
+r = requests.get(f"{API}/dashboard/stats", headers=hdr(smoke_token))
+if r.status_code == 200:
+    j = r.json()
+    if all(k in j for k in ("streak", "active_goals", "today_total", "today_done")):
+        ok("GET /api/dashboard/stats",
+           f"streak={j['streak']} active_goals={j['active_goals']} today_done={j['today_done']}/{j['today_total']}")
+    else:
+        fail("GET /api/dashboard/stats", f"missing keys: {j}")
+else:
+    fail("GET /api/dashboard/stats", f"{r.status_code} {r.text[:200]}")
 
+# 1.12 nudge
+r = requests.get(f"{API}/nudge", headers=hdr(smoke_token))
+if r.status_code == 200 and "show" in r.json():
+    ok("GET /api/nudge", f"show={r.json().get('show')}")
+else:
+    fail("GET /api/nudge", f"{r.status_code} {r.text[:200]}")
 
-def test_ai_plan_localized_spanish():
-    # Ensure locale is es
-    requests.post(f"{API}/auth/locale", headers=auth_headers(TOKEN), json={"locale": "es"}, timeout=15)
+# 1.13 weekly review
+r = requests.get(f"{API}/review/weekly", headers=hdr(smoke_token))
+if r.status_code == 200:
+    j = r.json()
+    if "summary" in j and "completion_rate" in j:
+        ok("GET /api/review/weekly",
+           f"completion_rate={j['completion_rate']}% summary_len={len(j['summary'] or '')}")
+    else:
+        fail("GET /api/review/weekly", f"missing keys: {j}")
+else:
+    fail("GET /api/review/weekly", f"{r.status_code} {r.text[:300]}")
 
-    # Free plan only allows 1 active goal — clean up any existing active goals first
-    list_r = requests.get(f"{API}/goals", headers=auth_headers(TOKEN), timeout=15)
-    if list_r.status_code == 200:
-        for g in list_r.json():
-            if g.get("status") == "active":
-                requests.delete(f"{API}/goals/{g['id']}", headers=auth_headers(TOKEN), timeout=15)
+# 1.14 calendar url -> token
+r = requests.get(f"{API}/calendar/url", headers=hdr(smoke_token))
+cal_token = None
+if r.status_code == 200 and r.json().get("token"):
+    cal_token = r.json()["token"]
+    ok("GET /api/calendar/url", "token returned")
+else:
+    fail("GET /api/calendar/url", f"{r.status_code} {r.text[:200]}")
 
-    payload = {
-        "title": "Aprender a tocar guitarra",
-        "deadline": "2026-09-30",
-        "motivation": "Quiero impresionar a mis amigos en una fiesta.",
-        "current_level": "beginner",
-        "hours_per_week": 5,
-    }
-    r = requests.post(f"{API}/goals", headers=auth_headers(TOKEN), json=payload, timeout=120)
-    if r.status_code != 200:
-        record_fail("AI plan localization /goals POST", f"status={r.status_code} body={r.text[:300]}")
-        return False
-    goal = r.json()
-    plan = goal.get("plan") or {}
-    summary = plan.get("summary", "")
-    print(f"AI plan summary (es): {summary!r}")
-    is_es, reason = looks_spanish(summary)
-    if is_es:
-        record_pass("AI plan summary in Spanish", reason)
-        return True
-    # Tolerate AI flakiness only if summary has any non-ASCII or some Spanish word
-    record_fail("AI plan summary not in Spanish", f"summary={summary!r} | reason={reason}")
-    return False
+# 1.15 calendar export.ics
+if cal_token:
+    r = requests.get(f"{API}/calendar/export.ics", params={"token": cal_token})
+    ct = r.headers.get("content-type", "")
+    body = r.text or ""
+    if r.status_code == 200 and ("text/calendar" in ct or "BEGIN:VCALENDAR" in body):
+        ok("GET /api/calendar/export.ics", f"ct={ct} bytes={len(body)}")
+    else:
+        fail("GET /api/calendar/export.ics", f"{r.status_code} ct={ct} body[:120]={body[:120]}")
 
+# 1.16 checkout/session
+r = requests.post(
+    f"{API}/checkout/session",
+    json={"package_id": "pro_monthly", "origin_url": "https://example.com"},
+    headers=hdr(smoke_token),
+)
+if r.status_code == 200:
+    j = r.json()
+    if j.get("url") and j.get("session_id"):
+        ok("POST /api/checkout/session", f"session_id={j['session_id'][:14]}")
+    else:
+        fail("POST /api/checkout/session", f"missing fields: {j}")
+else:
+    # Stripe test key may fail externally; treat 5xx as warning, but spec wants 200
+    fail("POST /api/checkout/session", f"{r.status_code} {r.text[:300]}")
 
-# =========================================================================
-# 3. POST /api/webhook/stripe
-# =========================================================================
-def test_webhook_bad_signature():
-    r = requests.post(
-        f"{API}/webhook/stripe",
-        data=b"{}",
-        headers={"Stripe-Signature": "bad", "Content-Type": "application/json"},
-        timeout=15,
+# 1.17 webhook bad signature -> 400
+r = requests.post(
+    f"{API}/webhook/stripe",
+    data=b"{}",
+    headers={"Stripe-Signature": "bad", "Content-Type": "application/json"},
+)
+if r.status_code == 400:
+    ok("POST /api/webhook/stripe (bad sig)", "400 as expected")
+else:
+    fail("POST /api/webhook/stripe (bad sig)", f"{r.status_code} {r.text[:200]}")
+
+# 1.18 delete goal
+if goal_id:
+    r = requests.delete(f"{API}/goals/{goal_id}", headers=hdr(smoke_token))
+    if r.status_code == 200 and r.json().get("ok") is True:
+        ok("DELETE /api/goals/{id}", "deleted")
+    else:
+        fail("DELETE /api/goals/{id}", f"{r.status_code} {r.text[:200]}")
+
+# ---------------------------------------------------------------------------
+# Section 2 — Idempotency-Key on POST /api/goals
+# ---------------------------------------------------------------------------
+print("\n" + "=" * 72)
+print("SECTION 2 — Idempotency-Key on POST /api/goals")
+print("=" * 72)
+
+# Use fresh user to avoid cross-test pollution
+uniq2 = uuid.uuid4().hex[:10]
+IDEM_EMAIL = f"idem_{uniq2}@goalpilot.ai"
+r = requests.post(f"{API}/auth/register", json={
+    "email": IDEM_EMAIL, "password": "Idem@2026!", "name": f"Idem {uniq2[:4]}"
+})
+assert r.status_code == 200, f"idem register failed: {r.status_code} {r.text}"
+idem_token = r.json()["token"]
+idem_user_id = r.json()["user"]["id"]
+print(f"  fresh user: {IDEM_EMAIL} id={idem_user_id[:8]}")
+
+idem_payload = {
+    "title": "Run a 5K in under 30 minutes",
+    "deadline": "2026-09-15",
+    "motivation": "Improve cardiovascular fitness for energy and longevity",
+    "current_level": "beginner",
+    "hours_per_week": 3,
+}
+
+# 2.1 First request with key K1 -> 200
+K1 = str(uuid.uuid4())
+r1 = requests.post(
+    f"{API}/goals",
+    json=idem_payload,
+    headers={**hdr(idem_token), "X-Idempotency-Key": K1},
+)
+if r1.status_code == 200:
+    g1 = r1.json()
+    g1_id = g1.get("id")
+    ok("Idem 200 — first call with key", f"goal id={g1_id[:8]}")
+else:
+    fail("Idem 200 — first call with key", f"{r1.status_code} {r1.text[:300]}")
+    g1_id = None
+
+# 2.2 Same body + same key K1 -> replay, same goal id, status 200
+r2 = requests.post(
+    f"{API}/goals",
+    json=idem_payload,
+    headers={**hdr(idem_token), "X-Idempotency-Key": K1},
+)
+if r2.status_code == 200 and g1_id and r2.json().get("id") == g1_id:
+    ok("Idem 200 replay", f"same goal id={g1_id[:8]}")
+else:
+    fail("Idem 200 replay",
+         f"status={r2.status_code} replay_id={r2.json().get('id') if r2.headers.get('content-type','').startswith('application/json') else r2.text[:120]} expected={g1_id}")
+
+# 2.3 Verify cache row in idempotency_keys
+async def _check_cache_row(user_id, key, expected_status):
+    from motor.motor_asyncio import AsyncIOMotorClient
+    mongo = AsyncIOMotorClient("mongodb://localhost:27017")
+    db = mongo["goalpilot_db"]
+    doc = await db.idempotency_keys.find_one({"user_id": user_id, "key": key})
+    mongo.close()
+    return doc
+
+doc = asyncio.run(_check_cache_row(idem_user_id, K1, 200))
+if doc and doc.get("status_code") == 200 and doc.get("created_at"):
+    ok("idempotency_keys cache (200 row)",
+       f"keys={sorted(set(doc.keys()) & {'user_id','key','status_code','response','created_at'})}")
+else:
+    fail("idempotency_keys cache (200 row)", f"doc={doc}")
+
+# 2.4 No-key second call should hit free-plan cap (402)
+r3 = requests.post(f"{API}/goals", json=idem_payload, headers=hdr(idem_token))
+if r3.status_code == 402:
+    ok("No-key 402 (free plan cap)", f"detail={r3.json().get('detail','')[:80]}")
+else:
+    fail("No-key 402 (free plan cap)", f"{r3.status_code} {r3.text[:200]}")
+
+# 2.5 Idempotent 402: hit cap with new key K2, then retry K2 -> still 402
+K2 = str(uuid.uuid4())
+r4 = requests.post(
+    f"{API}/goals",
+    json=idem_payload,
+    headers={**hdr(idem_token), "X-Idempotency-Key": K2},
+)
+if r4.status_code == 402:
+    ok("Idem 402 — first cap-hit with key", f"detail={r4.json().get('detail','')[:60]}")
+else:
+    fail("Idem 402 — first cap-hit with key", f"{r4.status_code} {r4.text[:200]}")
+
+r5 = requests.post(
+    f"{API}/goals",
+    json=idem_payload,
+    headers={**hdr(idem_token), "X-Idempotency-Key": K2},
+)
+if r5.status_code == 402:
+    ok("Idem 402 replay", f"still 402 on retry with K2")
+else:
+    fail("Idem 402 replay", f"{r5.status_code} {r5.text[:200]}")
+
+# 2.6 Verify 402 cache row
+doc402 = asyncio.run(_check_cache_row(idem_user_id, K2, 402))
+if doc402 and doc402.get("status_code") == 402 and doc402.get("detail"):
+    ok("idempotency_keys cache (402 row)",
+       f"detail={doc402.get('detail','')[:50]} created_at={doc402.get('created_at','')[:19]}")
+else:
+    fail("idempotency_keys cache (402 row)", f"doc={doc402}")
+
+# ---------------------------------------------------------------------------
+# Section 3 — APScheduler daily push job (verify only)
+# ---------------------------------------------------------------------------
+print("\n" + "=" * 72)
+print("SECTION 3 — APScheduler daily push job (verify wiring; DO NOT trigger)")
+print("=" * 72)
+
+try:
+    out = subprocess.run(
+        ["grep", "-c", "Scheduler started: daily push at 09:00 UTC", "/var/log/supervisor/backend.err.log"],
+        capture_output=True, text=True, check=False,
     )
-    if r.status_code != 400:
-        record_fail("webhook bad signature", f"expected 400 got {r.status_code} body={r.text}")
-        return False
-    if "Invalid webhook" not in r.text:
-        record_warn("webhook 400 detail mismatch", r.text)
-    record_pass("POST /api/webhook/stripe bad signature -> 400")
-    return True
+    count = int((out.stdout or "0").strip() or "0")
+    if count >= 1:
+        ok("Scheduler log line present", f"matches={count}")
+    else:
+        fail("Scheduler log line present", "not found in backend.err.log")
+except Exception as e:
+    fail("Scheduler log grep", str(e))
 
+# Sanity: API root still serves
+r = requests.get(f"{API}/")
+if r.status_code == 200 and r.json().get("status") == "ok":
+    ok("API root /api/ still serves", "scheduler did not break startup")
+else:
+    fail("API root /api/", f"{r.status_code} {r.text[:200]}")
 
-def test_webhook_idempotency_marker():
-    """We can't fully simulate paid because StripeCheckout signature validation will fail without secret bypass.
-    Just verify 400 is consistent and existing user plan unchanged after multiple invalid calls.
-    Also insert a paid txn doc in DB and verify webhook still 400s and user plan untouched.
-    """
-    # Capture current plan
-    me0 = requests.get(f"{API}/auth/me", headers=auth_headers(TOKEN), timeout=15).json()
-    plan_before = me0.get("plan")
-
-    # Insert a payment_transactions doc directly via mongo
-    try:
-        import asyncio
-        from motor.motor_asyncio import AsyncIOMotorClient
-        mongo_url = os.environ.get("MONGO_URL", "mongodb://localhost:27017")
-        db_name = os.environ.get("DB_NAME", "goalpilot_db")
-
-        async def insert_paid_doc():
-            cli = AsyncIOMotorClient(mongo_url)
-            db = cli[db_name]
-            sid = f"cs_test_{uuid.uuid4().hex[:16]}"
-            await db.payment_transactions.insert_one({
-                "id": str(uuid.uuid4()),
-                "session_id": sid,
-                "user_id": USER_ID,
-                "user_email": EMAIL,
-                "package_id": "pro_monthly",
-                "plan": "pro",
-                "billing": "monthly",
-                "amount": 12.00,
-                "currency": "usd",
-                "payment_status": "paid",
-                "status": "complete",
-                "metadata": {},
-                "created_at": "2026-01-01T00:00:00+00:00",
-                "updated_at": "2026-01-01T00:00:00+00:00",
-            })
-            cli.close()
-            return sid
-
-        sid = asyncio.get_event_loop().run_until_complete(insert_paid_doc()) if False else asyncio.run(insert_paid_doc())
-        print(f"Inserted paid txn session_id={sid}")
-    except Exception as e:
-        record_warn("could not insert mongo doc directly", str(e))
-
-    # Multiple bad-signature posts
-    for _ in range(3):
-        r = requests.post(
-            f"{API}/webhook/stripe",
-            data=b"{}",
-            headers={"Stripe-Signature": "bad", "Content-Type": "application/json"},
-            timeout=15,
-        )
-        if r.status_code != 400:
-            record_fail("webhook idempotency consistency", f"got {r.status_code}")
-            return False
-
-    me1 = requests.get(f"{API}/auth/me", headers=auth_headers(TOKEN), timeout=15).json()
-    plan_after = me1.get("plan")
-    if plan_before != plan_after:
-        record_fail("webhook should not have changed user plan", f"{plan_before} -> {plan_after}")
-        return False
-    record_pass("webhook 400 consistent + user plan unchanged after invalid posts")
-    return True
-
-
-# =========================================================================
-# 4. Regression on existing endpoints
-# =========================================================================
-def test_login():
-    r = requests.post(f"{API}/auth/login", json={"email": EMAIL, "password": PASSWORD}, timeout=15)
-    if r.status_code != 200 or "token" not in r.json():
-        record_fail("/api/auth/login", f"{r.status_code} {r.text}")
-        return False
-    record_pass("/api/auth/login")
-    return True
-
-
-def test_me():
-    r = requests.get(f"{API}/auth/me", headers=auth_headers(TOKEN), timeout=15)
-    if r.status_code != 200 or r.json().get("id") != USER_ID:
-        record_fail("/api/auth/me", f"{r.status_code} {r.text}")
-        return False
-    record_pass("/api/auth/me")
-    return True
-
-
-def test_goals_get():
-    r = requests.get(f"{API}/goals", headers=auth_headers(TOKEN), timeout=15)
-    if r.status_code != 200 or not isinstance(r.json(), list):
-        record_fail("/api/goals GET", f"{r.status_code} {r.text}")
-        return False
-    record_pass(f"/api/goals GET ({len(r.json())} goals)")
-    return True
-
-
-def test_dashboard_stats():
-    r = requests.get(f"{API}/dashboard/stats", headers=auth_headers(TOKEN), timeout=15)
-    if r.status_code != 200:
-        record_fail("/api/dashboard/stats", f"{r.status_code} {r.text}")
-        return False
-    body = r.json()
-    expected = {"today_total", "today_done", "today_pct", "active_goals", "total_completed", "missed", "streak"}
-    if not expected.issubset(body.keys()):
-        record_fail("/api/dashboard/stats keys", f"missing: {expected - set(body.keys())}")
-        return False
-    record_pass(f"/api/dashboard/stats {body}")
-    return True
-
-
-def test_nudge():
-    r = requests.get(f"{API}/nudge", headers=auth_headers(TOKEN), timeout=15)
-    if r.status_code != 200:
-        record_fail("/api/nudge", f"{r.status_code} {r.text}")
-        return False
-    body = r.json()
-    if "show" not in body:
-        record_fail("/api/nudge body", f"missing 'show': {body}")
-        return False
-    record_pass(f"/api/nudge show={body.get('show')}")
-    return True
-
-
-def test_review_weekly():
-    r = requests.get(f"{API}/review/weekly", headers=auth_headers(TOKEN), timeout=120)
-    if r.status_code != 200:
-        record_fail("/api/review/weekly", f"{r.status_code} {r.text}")
-        return False
-    body = r.json()
-    expected = {"completed", "missed", "total_due", "completion_rate", "summary", "suggestion"}
-    if not expected.issubset(body.keys()):
-        record_fail("/api/review/weekly keys", f"missing: {expected - set(body.keys())}")
-        return False
-    record_pass(f"/api/review/weekly summary_len={len(body.get('summary',''))}")
-    return True
-
-
-# Run all
-print("\n========== Running tests ==========\n")
-test_locale_happy_paths()
-test_locale_unsupported()
-test_locale_no_auth()
-test_locale_persistence_in_mongo()
-
-test_ai_plan_localized_spanish()
-
-test_webhook_bad_signature()
-test_webhook_idempotency_marker()
-
-test_login()
-test_me()
-test_goals_get()
-test_dashboard_stats()
-test_nudge()
-test_review_weekly()
-
-print("\n========== Summary ==========")
-print(f"Passed: {len(results['passed'])}")
-print(f"Failed: {len(results['failed'])}")
-print(f"Warnings: {len(results['warnings'])}")
-for n, info in results["failed"]:
-    print(f"  FAIL: {n} -- {info}")
-for n, info in results["warnings"]:
-    print(f"  WARN: {n} -- {info}")
-sys.exit(0 if not results["failed"] else 1)
+# ---------------------------------------------------------------------------
+# Summary
+# ---------------------------------------------------------------------------
+print("\n" + "=" * 72)
+print(f"PASSED: {len(results['passed'])}")
+print(f"FAILED: {len(results['failed'])}")
+print(f"WARN  : {len(results['warnings'])}")
+if results["failed"]:
+    print("\nFAILURES:")
+    for n, m in results["failed"]:
+        print(f"  - {n}: {m}")
+if results["warnings"]:
+    print("\nWARNINGS:")
+    for n, m in results["warnings"]:
+        print(f"  - {n}: {m}")
+print("=" * 72)
+exit(1 if results["failed"] else 0)
