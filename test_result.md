@@ -198,6 +198,21 @@ backend:
         agent: "testing"
         comment: "Bad signature path: POST /api/webhook/stripe with body b'{}' and Stripe-Signature: 'bad' returned 400 with detail 'Invalid webhook' as expected; consistent across 3 repeated calls. Idempotency check: directly inserted a payment_transactions doc (session_id=cs_test_*, payment_status=paid, plan=pro) into Mongo for the test user, then re-posted the invalid webhook several times. Backend correctly returned 400 each time and the user's plan field was unchanged in /api/auth/me before vs after, confirming no unintended state mutation. Note: STRIPE_WEBHOOK_SECRET in backend/.env is empty so we could not exercise the success path with a real Stripe signature; signature validation correctly rejects all unsigned/garbage payloads. Recommend setting STRIPE_WEBHOOK_SECRET in production for live verification of the paid+idempotent branch, but the code paths are correct."
 
+  - task: "In-app notification preferences (GET/PATCH /api/notifications/prefs) + scheduler respects prefs"
+    implemented: true
+    working: true
+    file: "/app/backend/routes/notifications.py, /app/backend/services/scheduler.py, /app/backend/models/schemas.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "Added GET /api/notifications/prefs (returns defaults {morning:true, streak:true} when user has none stored) and PATCH /api/notifications/prefs with NotifPrefsReq(morning: Optional[bool], streak: Optional[bool]) — partial updates merge onto existing/default prefs and persist to users.notification_prefs. Scheduler's _build_user_message now reads notification_prefs and returns None if both flags are off; streak branches gated by streak_on; morning branch gated by morning_on."
+      - working: true
+        agent: "testing"
+        comment: "All 8 live-backend assertions PASS against https://goal-pilot-ai.preview.emergentagent.com/api. (1) GET /api/notifications/prefs without token -> 401. (2) Fresh user (notif_fresh_<uuid>@goalpilot.ai, registered on-the-fly) GET returns exactly {'morning': True, 'streak': True}. (3) PATCH {'morning': false} -> 200 {'morning': false, 'streak': true}; subsequent GET confirms persistence. (4) PATCH {'streak': false} (on user now with morning=false) -> 200 {'morning': false, 'streak': false} (partial merge retained morning=false). (5) PATCH {'morning': true, 'streak': true} -> 200 defaults restored. (6) PATCH with empty body {} -> 200 and returns current prefs unchanged {'morning': true, 'streak': true}. (7) PATCH without Authorization header -> 401. Scheduler integration verified via direct async call to services.scheduler._build_user_message: user with {'morning': False, 'streak': False} returned None; user with {'morning': True, 'streak': False} and no history also returned None (streak_start correctly gated by streak_on); user with both True + no history returned a streak_start push message. notification_prefs is correctly wired end-to-end into the daily push job."
+
 frontend:
   - task: "Vector icons font preload (fixes squared icon glyphs)"
     implemented: true
@@ -282,6 +297,28 @@ agent_communication:
       - /api/auth/locale happy path (es, fr, zh-CN), validation error for unsupported (e.g. 'xx'), 401 unauth.
       - /api/goals creation with locale set returns plan.summary text in target language (sanity check).
       - /api/webhook/stripe returns 400 on bad signature; 200 + idempotent on already-paid session.
+  - agent: "testing"
+    message: |
+      Notification preferences targeted test (2026): 8/8 API assertions PASS + 3/3 scheduler
+      assertions PASS against live backend.
+
+      API (https://goal-pilot-ai.preview.emergentagent.com/api):
+        - GET /api/notifications/prefs (no token) -> 401
+        - Fresh user -> GET returns {"morning": true, "streak": true}
+        - PATCH {"morning": false} -> {"morning": false, "streak": true} (persisted, verified by GET)
+        - PATCH {"streak": false} -> {"morning": false, "streak": false}
+        - PATCH {"morning": true, "streak": true} -> defaults restored
+        - PATCH {} (empty body) -> 200, current prefs unchanged
+        - PATCH without token -> 401
+
+      Scheduler (services.scheduler._build_user_message, called directly via python -c):
+        - {'morning': False, 'streak': False} -> None (both off shortcut)
+        - {'morning': True, 'streak': False} with no history -> None (streak_start correctly
+          gated by streak_on even though morning is on, because no tasks today)
+        - {'morning': True, 'streak': True} with no history -> streak_start push payload
+
+      No critical issues. Task marked working: true, current_focus remains cleared.
+
   - agent: "testing"
     message: |
       All 27 backend assertions PASS against live preview backend.

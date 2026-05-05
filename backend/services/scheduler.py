@@ -78,6 +78,12 @@ def _t(locale: str, key: str, **fmt) -> str:
 async def _build_user_message(user: dict) -> dict | None:
     """Pick the best push for one user. Returns None if no push should be sent."""
     locale = user.get('locale') or 'en-US'
+    prefs = user.get('notification_prefs') or {}
+    morning_on = prefs.get('morning', True)
+    streak_on = prefs.get('streak', True)
+    if not morning_on and not streak_on:
+        return None
+
     today = datetime.now(timezone.utc).date()
 
     # Determine streak risk: when was the last completed task?
@@ -99,19 +105,27 @@ async def _build_user_message(user: dict) -> dict | None:
     notif_type = 'morning'
 
     if days_since is None:
+        if not streak_on:
+            return None
         # never completed anything — streak start nudge
         title = _t(locale, 'streak_start_title')
         body = _t(locale, 'streak_start_body')
         notif_type = 'streak_start'
     elif days_since >= 4:
+        if not streak_on:
+            return None
         title = _t(locale, 'streak_back_title')
         body = _t(locale, 'streak_back_body', n=days_since)
         notif_type = 'streak_back'
     elif days_since >= 1:
+        if not streak_on:
+            return None
         title = _t(locale, 'streak_day_title')
         body = _t(locale, 'streak_day_body')
         notif_type = 'streak_day'
     else:
+        if not morning_on:
+            return None
         # On streak — morning summary if tasks today
         today_s = today.isoformat()
         cursor = db.tasks.find(

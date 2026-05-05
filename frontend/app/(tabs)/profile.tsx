@@ -92,7 +92,9 @@ export default function Profile() {
             <Text style={styles.rowText}>{t('smart_reminders')}</Text>
             <Text style={styles.rowSub}>{t('smart_reminders_sub')}</Text>
           </View>
-          <View style={[styles.toggle, styles.toggleOn]}><View style={[styles.knob, styles.knobOn]} /></View>
+          <TouchableOpacity onPress={() => router.push('/settings/notifications')} testID="profile-notifications-btn">
+            <Feather name="chevron-right" size={18} color={colors.textTertiary} />
+          </TouchableOpacity>
         </View>
 
         <TouchableOpacity style={styles.logout} onPress={logout} testID="profile-logout-btn">

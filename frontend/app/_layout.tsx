@@ -46,6 +46,7 @@ function RootNav() {
       <Stack.Screen name="pricing" options={{ presentation: 'modal' }} />
       <Stack.Screen name="payment/success" />
       <Stack.Screen name="settings/language" options={{ presentation: 'modal' }} />
+      <Stack.Screen name="settings/notifications" options={{ presentation: 'modal' }} />
     </Stack>
   );
 }

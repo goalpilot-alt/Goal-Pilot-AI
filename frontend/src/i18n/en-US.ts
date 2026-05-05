@@ -173,6 +173,15 @@ export const en_US = {
   payment_expired: 'Payment expired',
   payment_check_failed: 'Payment check failed',
 
+  // Notifications screen
+  notifications: 'Notifications',
+  daily_pushes: 'Daily pushes',
+  morning_summary: 'Morning summary',
+  morning_summary_sub: "Get a quick rundown of today's tasks and your top priority.",
+  streak_nudges: 'Streak nudges',
+  streak_nudges_sub: "Friendly reminders to keep your momentum when you're falling off-plan.",
+  notif_foot: 'Pushes are sent once daily. Disable both to fully mute.',
+
   // Nudge: Newly translated keys
   nudge_start_title: "Let's start your streak",
   nudge_start_msg: 'Complete one small task today to kick off your momentum.',

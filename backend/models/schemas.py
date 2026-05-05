@@ -40,5 +40,10 @@ class PushTokenReq(BaseModel):
     platform: Optional[str] = None  # 'ios' | 'android' | 'web'
 
 
+class NotifPrefsReq(BaseModel):
+    morning: Optional[bool] = None
+    streak: Optional[bool] = None
+
+
 class LocaleReq(BaseModel):
     locale: str
