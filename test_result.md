@@ -199,6 +199,18 @@ backend:
         comment: "Bad signature path: POST /api/webhook/stripe with body b'{}' and Stripe-Signature: 'bad' returned 400 with detail 'Invalid webhook' as expected; consistent across 3 repeated calls. Idempotency check: directly inserted a payment_transactions doc (session_id=cs_test_*, payment_status=paid, plan=pro) into Mongo for the test user, then re-posted the invalid webhook several times. Backend correctly returned 400 each time and the user's plan field was unchanged in /api/auth/me before vs after, confirming no unintended state mutation. Note: STRIPE_WEBHOOK_SECRET in backend/.env is empty so we could not exercise the success path with a real Stripe signature; signature validation correctly rejects all unsigned/garbage payloads. Recommend setting STRIPE_WEBHOOK_SECRET in production for live verification of the paid+idempotent branch, but the code paths are correct."
 
 frontend:
+  - task: "Vector icons font preload (fixes squared icon glyphs)"
+    implemented: true
+    working: true
+    file: "/app/frontend/app/_layout.tsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "User reported all icons rendering as empty squares on web preview. Root cause: Feather icon font from @expo/vector-icons was not preloaded — RNW served fallback glyphs (filled boxes) until font loaded async. Fixed by calling useFonts(Feather.font) in RootNav and gating the Stack render on fontsLoaded. Verified via screenshots: dashboard now shows zap, target, life-buoy, coffee, sun, bar-chart, user, plus icons correctly. No styling change."
+
   - task: "i18n integration across all screens with reactive provider"
     implemented: true
     working: true

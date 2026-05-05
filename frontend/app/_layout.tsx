@@ -5,10 +5,15 @@ import { useEffect } from 'react';
 import { View, ActivityIndicator, StyleSheet } from 'react-native';
 import { colors } from '../src/theme';
 import { StatusBar } from 'expo-status-bar';
+import { useFonts } from 'expo-font';
+import { Feather } from '@expo/vector-icons';
 
 function RootNav() {
   const { user, loading } = useAuth();
   const { ready: i18nReady } = useI18n();
+  const [fontsLoaded] = useFonts({
+    ...(Feather.font as any),
+  });
   const segments = useSegments();
   const router = useRouter();
 
@@ -22,7 +27,7 @@ function RootNav() {
     }
   }, [user, loading, segments]);
 
-  if (loading || !i18nReady) {
+  if (loading || !i18nReady || !fontsLoaded) {
     return (
       <View style={styles.loader}>
         <ActivityIndicator color={colors.primary} size="large" />
