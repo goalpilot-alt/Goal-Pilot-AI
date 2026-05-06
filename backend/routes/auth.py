@@ -7,7 +7,7 @@ from core.auth import (
 )
 from core.config import SUPPORTED_LOCALES
 from core.db import db
-from models.schemas import RegisterReq, LoginReq, AuthResp, LocaleReq
+from models.schemas import RegisterReq, LoginReq, AuthResp, LocaleReq, TimezoneReq
 
 router = APIRouter()
 
@@ -55,3 +55,15 @@ async def set_locale(req: LocaleReq, user: dict = Depends(get_current_user)):
         raise HTTPException(status_code=400, detail='Unsupported locale')
     await db.users.update_one({'id': user['id']}, {'$set': {'locale': req.locale}})
     return {'ok': True, 'locale': req.locale}
+
+
+@router.post('/auth/timezone')
+async def set_timezone(req: TimezoneReq, user: dict = Depends(get_current_user)):
+    """Save the user's IANA timezone (e.g. 'America/New_York'). Validated against zoneinfo."""
+    try:
+        from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+        ZoneInfo(req.timezone)  # raises if invalid
+    except Exception:
+        raise HTTPException(status_code=400, detail='Invalid timezone')
+    await db.users.update_one({'id': user['id']}, {'$set': {'timezone': req.timezone}})
+    return {'ok': True, 'timezone': req.timezone}

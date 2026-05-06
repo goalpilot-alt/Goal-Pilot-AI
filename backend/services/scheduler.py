@@ -7,6 +7,7 @@ Picks the most relevant message:
 """
 import logging
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
@@ -16,6 +17,10 @@ from services.push import send_expo_push
 
 logger = logging.getLogger(__name__)
 _scheduler: AsyncIOScheduler | None = None
+
+# Default local hour to deliver pushes (used when user has a known timezone).
+# User without a stored timezone uses the legacy fixed UTC schedule.
+DEFAULT_PUSH_LOCAL_HOUR = 9
 
 # Localized templates. Falls back to en-US for any locale we don't translate here.
 TEMPLATES = {
@@ -153,8 +158,14 @@ async def _build_user_message(user: dict) -> dict | None:
 
 
 async def daily_push_job():
-    """Run once daily — send personalised pushes to all users that have at least one push token."""
-    logger.info('Daily push job: starting')
+    """Run every hour — send personalised pushes to users whose local hour matches their delivery hour.
+
+    Selection logic:
+      - If user has `timezone` (IANA) set, push when their local hour == user.push_hour or DEFAULT_PUSH_LOCAL_HOUR.
+      - Otherwise (legacy users without TZ), push only when current UTC hour == PUSH_DAILY_HOUR_UTC.
+    """
+    now_utc = datetime.now(timezone.utc)
+    logger.info(f'Push job tick: utc_hour={now_utc.hour:02d}')
     sent = 0
     skipped = 0
     failed = 0
@@ -162,7 +173,7 @@ async def daily_push_job():
     # Iterate over distinct user_ids in push_tokens
     user_ids = await db.push_tokens.distinct('user_id')
     if not user_ids:
-        logger.info('Daily push job: no registered tokens, skipping')
+        logger.info('Push job: no registered tokens, skipping')
         return
 
     for uid in user_ids:
@@ -170,6 +181,27 @@ async def daily_push_job():
             user = await db.users.find_one({'id': uid}, {'_id': 0, 'password_hash': 0})
             if not user:
                 continue
+
+            # Decide if it's the right hour for this user
+            tz_name = user.get('timezone')
+            target_hour = int(user.get('push_hour') or DEFAULT_PUSH_LOCAL_HOUR)
+            if tz_name:
+                try:
+                    local_now = now_utc.astimezone(ZoneInfo(tz_name))
+                    if local_now.hour != target_hour:
+                        skipped += 1
+                        continue
+                except Exception:
+                    # Invalid stored TZ — fall back to UTC schedule below
+                    if now_utc.hour != PUSH_DAILY_HOUR_UTC:
+                        skipped += 1
+                        continue
+            else:
+                # No TZ → legacy behaviour: only the fixed UTC slot
+                if now_utc.hour != PUSH_DAILY_HOUR_UTC:
+                    skipped += 1
+                    continue
+
             msg = await _build_user_message(user)
             if not msg:
                 skipped += 1
@@ -197,32 +229,38 @@ async def daily_push_job():
                 'type': msg['data'].get('type'),
                 'sent_at': datetime.now(timezone.utc).isoformat(),
                 'count': len(expo_msgs),
+                'tz': tz_name or 'UTC',
+                'local_hour': target_hour,
             })
             sent += 1
         except Exception as e:
             failed += 1
-            logger.error(f'Daily push job: user {uid} failed: {e}')
+            logger.error(f'Push job: user {uid} failed: {e}')
 
-    logger.info(f'Daily push job: done sent={sent} skipped={skipped} failed={failed}')
+    logger.info(f'Push job: done sent={sent} skipped={skipped} failed={failed}')
 
 
 def start_scheduler():
-    """Start the APScheduler with the daily job. Idempotent."""
+    """Start the APScheduler with an hourly tick. Idempotent."""
     global _scheduler
     if _scheduler and _scheduler.running:
         return _scheduler
     sched = AsyncIOScheduler(timezone='UTC')
     sched.add_job(
         daily_push_job,
-        CronTrigger(hour=PUSH_DAILY_HOUR_UTC, minute=PUSH_DAILY_MINUTE_UTC, timezone='UTC'),
-        id='daily_push',
+        # Run every hour at minute=PUSH_DAILY_MINUTE_UTC. Per-user TZ filtering happens inside the job.
+        CronTrigger(minute=PUSH_DAILY_MINUTE_UTC, timezone='UTC'),
+        id='hourly_push_tick',
         replace_existing=True,
         max_instances=1,
         coalesce=True,
     )
     sched.start()
     _scheduler = sched
-    logger.info(f'Scheduler started: daily push at {PUSH_DAILY_HOUR_UTC:02d}:{PUSH_DAILY_MINUTE_UTC:02d} UTC')
+    logger.info(
+        f'Scheduler started: hourly tick at minute={PUSH_DAILY_MINUTE_UTC:02d} UTC; '
+        f'per-user delivery at local hour {DEFAULT_PUSH_LOCAL_HOUR} (fallback UTC hour {PUSH_DAILY_HOUR_UTC} when no TZ)'
+    )
     return sched
 
 

@@ -47,3 +47,7 @@ class NotifPrefsReq(BaseModel):
 
 class LocaleReq(BaseModel):
     locale: str
+
+
+class TimezoneReq(BaseModel):
+    timezone: str  # IANA name e.g. "America/New_York"

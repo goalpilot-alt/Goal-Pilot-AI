@@ -19,6 +19,13 @@ async function syncLocaleToBackend() {
   try { await api.post('/auth/locale', { locale: i18n.locale }); } catch {}
 }
 
+async function syncTimezoneToBackend() {
+  try {
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    if (tz) await api.post('/auth/timezone', { timezone: tz });
+  } catch {}
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User>(null);
   const [loading, setLoading] = useState(true);
@@ -29,8 +36,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const { data } = await api.get('/auth/me');
       setUser(data);
-      // ensure backend knows current locale (used by AI prompts + nudge messages)
+      // ensure backend knows current locale + timezone (used by AI prompts + scheduler)
       syncLocaleToBackend();
+      syncTimezoneToBackend();
     } catch {
       await clearToken();
     } finally {
@@ -45,6 +53,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await setToken(data.token);
     setUser(data.user);
     syncLocaleToBackend();
+    syncTimezoneToBackend();
   }
 
   async function register(email: string, password: string, name: string) {
@@ -52,6 +61,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await setToken(data.token);
     setUser(data.user);
     syncLocaleToBackend();
+    syncTimezoneToBackend();
   }
 
   async function logout() {

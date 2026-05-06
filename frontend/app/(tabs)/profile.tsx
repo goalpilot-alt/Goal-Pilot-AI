@@ -86,16 +86,14 @@ export default function Profile() {
           <Feather name="chevron-right" size={16} color={colors.textTertiary} />
         </TouchableOpacity>
 
-        <View style={styles.row}>
+        <TouchableOpacity style={styles.row} onPress={() => router.push('/settings/notifications')} testID="profile-notifications-btn">
           <Feather name="bell" size={18} color={colors.textPrimary} />
           <View style={{ flex: 1 }}>
             <Text style={styles.rowText}>{t('smart_reminders')}</Text>
             <Text style={styles.rowSub}>{t('smart_reminders_sub')}</Text>
           </View>
-          <TouchableOpacity onPress={() => router.push('/settings/notifications')} testID="profile-notifications-btn">
-            <Feather name="chevron-right" size={18} color={colors.textTertiary} />
-          </TouchableOpacity>
-        </View>
+          <Feather name="chevron-right" size={18} color={colors.textTertiary} />
+        </TouchableOpacity>
 
         <TouchableOpacity style={styles.logout} onPress={logout} testID="profile-logout-btn">
           <Feather name="log-out" size={16} color={colors.error} />

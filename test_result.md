@@ -214,6 +214,30 @@ backend:
         comment: "All 8 live-backend assertions PASS against https://goal-pilot-ai.preview.emergentagent.com/api. (1) GET /api/notifications/prefs without token -> 401. (2) Fresh user (notif_fresh_<uuid>@goalpilot.ai, registered on-the-fly) GET returns exactly {'morning': True, 'streak': True}. (3) PATCH {'morning': false} -> 200 {'morning': false, 'streak': true}; subsequent GET confirms persistence. (4) PATCH {'streak': false} (on user now with morning=false) -> 200 {'morning': false, 'streak': false} (partial merge retained morning=false). (5) PATCH {'morning': true, 'streak': true} -> 200 defaults restored. (6) PATCH with empty body {} -> 200 and returns current prefs unchanged {'morning': true, 'streak': true}. (7) PATCH without Authorization header -> 401. Scheduler integration verified via direct async call to services.scheduler._build_user_message: user with {'morning': False, 'streak': False} returned None; user with {'morning': True, 'streak': False} and no history also returned None (streak_start correctly gated by streak_on); user with both True + no history returned a streak_start push message. notification_prefs is correctly wired end-to-end into the daily push job."
 
 frontend:
+  - task: "Per-user timezone for daily push (POST /api/auth/timezone + hourly scheduler)"
+    implemented: true
+    working: true
+    file: "/app/backend/routes/auth.py + /app/backend/services/scheduler.py + /app/frontend/src/AuthContext.tsx"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "Backend: POST /api/auth/timezone validates IANA TZ via zoneinfo and stores user.timezone. Scheduler now ticks hourly (CronTrigger minute=0) and per user computes local hour via ZoneInfo; only sends when local_hour == user.push_hour (default 9). Users without timezone fall back to legacy fixed UTC slot. Verified live: hourly ticks logged, valid/invalid/auth tests all pass.\nFrontend: AuthContext.bootstrap/login/register now also calls POST /api/auth/timezone with Intl.DateTimeFormat().resolvedOptions().timeZone, alongside existing locale sync."
+
+  - task: "Profile -> Notifications row whole-row tap + 6 more locale translations for notif screen"
+    implemented: true
+    working: true
+    file: "/app/frontend/app/(tabs)/profile.tsx + /app/frontend/src/i18n/{fr,cs,sk,ru,zh-CN,en-US,es}.ts"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "Profile 'Smart Reminders' row is now wrapped in a single TouchableOpacity, so tapping anywhere navigates to /settings/notifications (previously only the chevron was tappable). Added native-language strings for the 5 main remaining locales: fr, cs, sk, ru, zh-CN (en-GB inherits from en-US via spread). Verified visually in French \u2014 Notifications, Notifications quotidiennes, R\u00e9sum\u00e9 matinal, Rappels de s\u00e9rie, footer all translated."
+
   - task: "Notification preferences (GET/PATCH /api/notifications/prefs + scheduler gating)"
     implemented: true
     working: true
