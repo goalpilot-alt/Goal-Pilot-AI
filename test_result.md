@@ -214,6 +214,18 @@ backend:
         comment: "All 8 live-backend assertions PASS against https://goal-pilot-ai.preview.emergentagent.com/api. (1) GET /api/notifications/prefs without token -> 401. (2) Fresh user (notif_fresh_<uuid>@goalpilot.ai, registered on-the-fly) GET returns exactly {'morning': True, 'streak': True}. (3) PATCH {'morning': false} -> 200 {'morning': false, 'streak': true}; subsequent GET confirms persistence. (4) PATCH {'streak': false} (on user now with morning=false) -> 200 {'morning': false, 'streak': false} (partial merge retained morning=false). (5) PATCH {'morning': true, 'streak': true} -> 200 defaults restored. (6) PATCH with empty body {} -> 200 and returns current prefs unchanged {'morning': true, 'streak': true}. (7) PATCH without Authorization header -> 401. Scheduler integration verified via direct async call to services.scheduler._build_user_message: user with {'morning': False, 'streak': False} returned None; user with {'morning': True, 'streak': False} and no history also returned None (streak_start correctly gated by streak_on); user with both True + no history returned a streak_start push message. notification_prefs is correctly wired end-to-end into the daily push job."
 
 frontend:
+  - task: "Stripe webhook secret wired to .env (live signature validation)"
+    implemented: true
+    working: true
+    file: "/app/backend/.env + /app/backend/services/stripe.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "Real Stripe webhook signing secret added to .env (whsec_..., 39 chars). Backend restarted; scheduler still healthy. Bogus signature test returns 400 with 'Invalid webhook' as expected. Endpoint is now ready to accept real Stripe-signed events at POST /api/webhook/stripe \u2014 user has registered the endpoint in their Stripe Test mode dashboard and is listening for checkout.session.completed."
+
   - task: "Per-user timezone for daily push (POST /api/auth/timezone + hourly scheduler)"
     implemented: true
     working: true
