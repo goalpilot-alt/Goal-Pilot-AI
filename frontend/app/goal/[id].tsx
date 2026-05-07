@@ -10,9 +10,11 @@ import { useI18n } from '../../src/i18n/I18nProvider';
 export default function GoalDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const [goal, setGoal] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [replanning, setReplanning] = useState(false);
+  const [dismissedFeasibility, setDismissedFeasibility] = useState(false);
 
   async function load() {
     try {
@@ -35,12 +37,39 @@ export default function GoalDetail() {
     ]);
   }
 
+  async function applyReplan(newDeadline: string) {
+    setReplanning(true);
+    try {
+      const { data } = await api.post(`/goals/${id}/replan`, { deadline: newDeadline });
+      setGoal(data);
+      setDismissedFeasibility(true);
+      Alert.alert(t('plan_updated'), t('plan_updated_msg'));
+    } catch (e: any) {
+      const d = e?.response?.data?.detail;
+      Alert.alert(t('oops'), typeof d === 'string' ? d : t('replan_failed'));
+    } finally { setReplanning(false); }
+  }
+
   if (loading) return <View style={styles.center}><ActivityIndicator color={colors.primary} size="large" /></View>;
   if (!goal) return null;
 
   const plan = goal.plan || {};
   const milestones = plan.milestones || [];
   const weekly = plan.weekly_plan || [];
+  const feasibility: 'ok' | 'tight' | 'unrealistic' | undefined = plan.feasibility;
+  const suggested = plan.suggested_deadline_iso;
+  const showFeasibility =
+    !dismissedFeasibility &&
+    (feasibility === 'tight' || feasibility === 'unrealistic') &&
+    suggested && suggested !== goal.deadline;
+  const feasibilityColor = feasibility === 'unrealistic' ? colors.error : colors.warning;
+  const feasibilityBg = feasibility === 'unrealistic' ? 'rgba(239,68,68,0.1)' : 'rgba(245,158,11,0.1)';
+  const feasibilityBorder = feasibility === 'unrealistic' ? 'rgba(239,68,68,0.35)' : 'rgba(245,158,11,0.35)';
+
+  function fmtDate(iso: string) {
+    try { return new Date(iso).toLocaleDateString(locale, { month: 'short', day: 'numeric', year: 'numeric' }); }
+    catch { return iso; }
+  }
 
   return (
     <SafeAreaView style={styles.root} edges={['top', 'bottom']}>
@@ -62,6 +91,48 @@ export default function GoalDetail() {
           <Text style={styles.meta}>• {goal.hours_per_week}h/wk</Text>
           <Text style={styles.meta}>• {goal.current_level}</Text>
         </View>
+
+        {showFeasibility ? (
+          <View style={[styles.feasCard, { backgroundColor: feasibilityBg, borderColor: feasibilityBorder }]} testID="feasibility-banner">
+            <View style={styles.aiRow}>
+              <Feather name="alert-triangle" size={16} color={feasibilityColor} />
+              <Text style={[styles.aiLabel, { color: feasibilityColor }]}>
+                {feasibility === 'unrealistic' ? t('deadline_unrealistic') : t('deadline_tight')}
+              </Text>
+            </View>
+            {plan.feasibility_reason ? (
+              <Text style={styles.feasReason}>{plan.feasibility_reason}</Text>
+            ) : null}
+            <Text style={styles.feasSuggested}>
+              {t('suggested_deadline_label')}: <Text style={{ color: colors.textPrimary, fontWeight: '700' }}>{fmtDate(suggested)}</Text>
+            </Text>
+            <View style={styles.feasBtnRow}>
+              <TouchableOpacity
+                style={[styles.feasBtn, styles.feasBtnGhost]}
+                onPress={() => setDismissedFeasibility(true)}
+                disabled={replanning}
+                testID="feasibility-keep-btn"
+              >
+                <Text style={styles.feasBtnGhostText}>{t('keep_my_deadline')}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.feasBtn, styles.feasBtnPrimary]}
+                onPress={() => applyReplan(suggested)}
+                disabled={replanning}
+                testID="feasibility-apply-btn"
+              >
+                {replanning ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <>
+                    <Feather name="refresh-cw" size={14} color="#fff" />
+                    <Text style={styles.feasBtnPrimaryText}>{t('use_suggested')}</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        ) : null}
 
         {plan.summary ? (
           <View style={styles.aiCard} testID="goal-ai-summary">
@@ -149,4 +220,13 @@ const styles = StyleSheet.create({
   weekGoalRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, marginTop: 4 },
   weekDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.textTertiary, marginTop: 8 },
   weekGoal: { color: colors.textSecondary, fontSize: 14, flex: 1, lineHeight: 20 },
+  feasCard: { borderRadius: radii.lg, padding: spacing.md, marginBottom: spacing.md, borderWidth: 1 },
+  feasReason: { color: colors.textPrimary, fontSize: 14, lineHeight: 20, marginTop: 6, marginBottom: spacing.sm },
+  feasSuggested: { color: colors.textSecondary, fontSize: 13, marginBottom: spacing.md },
+  feasBtnRow: { flexDirection: 'row', gap: spacing.sm },
+  feasBtn: { flex: 1, paddingVertical: 12, borderRadius: radii.full, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 },
+  feasBtnGhost: { borderWidth: 1, borderColor: colors.border },
+  feasBtnGhostText: { color: colors.textSecondary, fontWeight: '700', fontSize: 13 },
+  feasBtnPrimary: { backgroundColor: colors.primary },
+  feasBtnPrimaryText: { color: '#fff', fontWeight: '700', fontSize: 13 },
 });

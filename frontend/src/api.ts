@@ -4,7 +4,7 @@ import { Platform } from 'react-native';
 
 const BASE = process.env.EXPO_PUBLIC_BACKEND_URL;
 
-export const api = axios.create({ baseURL: `${BASE}/api` });
+export const api = axios.create({ baseURL: `${BASE}/api`, timeout: 180000 });
 
 const TOKEN_KEY = 'goalpilot_token';
 

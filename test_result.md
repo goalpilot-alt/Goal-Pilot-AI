@@ -214,6 +214,18 @@ backend:
         comment: "All 8 live-backend assertions PASS against https://goal-pilot-ai.preview.emergentagent.com/api. (1) GET /api/notifications/prefs without token -> 401. (2) Fresh user (notif_fresh_<uuid>@goalpilot.ai, registered on-the-fly) GET returns exactly {'morning': True, 'streak': True}. (3) PATCH {'morning': false} -> 200 {'morning': false, 'streak': true}; subsequent GET confirms persistence. (4) PATCH {'streak': false} (on user now with morning=false) -> 200 {'morning': false, 'streak': false} (partial merge retained morning=false). (5) PATCH {'morning': true, 'streak': true} -> 200 defaults restored. (6) PATCH with empty body {} -> 200 and returns current prefs unchanged {'morning': true, 'streak': true}. (7) PATCH without Authorization header -> 401. Scheduler integration verified via direct async call to services.scheduler._build_user_message: user with {'morning': False, 'streak': False} returned None; user with {'morning': True, 'streak': False} and no history also returned None (streak_start correctly gated by streak_on); user with both True + no history returned a streak_start push message. notification_prefs is correctly wired end-to-end into the daily push job."
 
 frontend:
+  - task: "AI plan respects start date + deadline + feasibility detection + replan"
+    implemented: true
+    working: true
+    file: "/app/backend/services/ai.py + /app/backend/routes/goals.py + /app/frontend/app/goal/[id].tsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "Bug fix + new feature. ROOT CAUSE: AI prompt lacked today's date so Claude assumed a generic multi-month plan regardless of actual time available. FIX: Pass START DATE (today) + DEADLINE + DAYS_AVAILABLE + WEEKS_AVAILABLE to the prompt with hard CONSTRAINTS that all milestone target_dates and day_offsets MUST be inside the window, and weekly_plan MUST equal weeks_available. AI now also returns: feasibility ('ok'|'tight'|'unrealistic'), feasibility_reason, suggested_deadline_iso, suggested_weeks. NEW ENDPOINT: POST /api/goals/{id}/replan {deadline:'YYYY-MM-DD'} regenerates the entire plan (summary, milestones, weekly_plan, daily_tasks) for a new deadline; deletes old tasks atomically. Validates deadline > today (400 otherwise). Frontend: amber/red feasibility banner on goal detail when feasibility != 'ok' AND suggested != original; two buttons 'Keep my deadline' / 'Use suggested {date}' \u2014 second invokes the replan endpoint. Verified end-to-end: 14-day B2 French goal correctly flagged unrealistic with 1-year suggestion; replan to suggested date returns 200 with 4 milestones + 2-week weekly_plan that fit; past deadline replan returns 400. Axios timeout raised to 180s for slow AI calls."
+
   - task: "Switch Stripe to Live mode (STRIPE_API_KEY=sk_live_..., STRIPE_WEBHOOK_SECRET=live whsec_...)"
     implemented: true
     working: true

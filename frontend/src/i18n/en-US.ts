@@ -173,6 +173,16 @@ export const en_US = {
   payment_expired: 'Payment expired',
   payment_check_failed: 'Payment check failed',
 
+  // Feasibility / replan
+  deadline_tight: 'Deadline is tight',
+  deadline_unrealistic: 'Deadline may be unrealistic',
+  suggested_deadline_label: 'Suggested deadline',
+  keep_my_deadline: 'Keep my deadline',
+  use_suggested: 'Use suggested',
+  plan_updated: 'Plan updated',
+  plan_updated_msg: 'Your milestones, weekly plan and tasks have been regenerated for the new deadline.',
+  replan_failed: "Couldn't update the plan. Please try again.",
+
   // Notifications screen
   notifications: 'Notifications',
   daily_pushes: 'Daily pushes',

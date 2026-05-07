@@ -3,6 +3,7 @@ import uuid
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Header, Request
+from pydantic import BaseModel
 
 from core.auth import get_current_user, get_user_locale
 from core.config import PLAN_GOAL_LIMITS
@@ -149,3 +150,62 @@ async def delete_goal(goal_id: str, user: dict = Depends(get_current_user)):
     if res.deleted_count == 0:
         raise HTTPException(status_code=404, detail='Goal not found')
     return {'ok': True}
+
+
+class ReplanReq(BaseModel):
+    deadline: str  # YYYY-MM-DD
+
+
+@router.post('/goals/{goal_id}/replan')
+async def replan_goal(goal_id: str, req: ReplanReq, user: dict = Depends(get_current_user)):
+    """Re-run AI plan generation with a new deadline. Replaces all existing tasks for this goal."""
+    goal = await db.goals.find_one({'id': goal_id, 'user_id': user['id']}, {'_id': 0})
+    if not goal:
+        raise HTTPException(status_code=404, detail='Goal not found')
+
+    # Validate new deadline is in the future
+    try:
+        new_deadline = datetime.fromisoformat(req.deadline).date()
+    except Exception:
+        raise HTTPException(status_code=400, detail='Invalid deadline format (YYYY-MM-DD)')
+    today = datetime.now(timezone.utc).date()
+    if new_deadline <= today:
+        raise HTTPException(status_code=400, detail='Deadline must be in the future')
+
+    goal['deadline'] = req.deadline
+    try:
+        ai_plan = await generate_ai_plan(goal, await get_user_locale(user))
+    except Exception as e:
+        logger.error(f'Replan AI generation failed: {e}')
+        raise HTTPException(status_code=500, detail='AI plan generation failed')
+
+    # Replace goal + tasks atomically (delete old tasks, then insert new ones)
+    await db.goals.update_one(
+        {'id': goal_id, 'user_id': user['id']},
+        {'$set': {
+            'deadline': req.deadline,
+            'plan': ai_plan,
+            'replanned_at': datetime.now(timezone.utc).isoformat(),
+        }},
+    )
+    await db.tasks.delete_many({'goal_id': goal_id, 'user_id': user['id']})
+
+    now = datetime.now(timezone.utc)
+    for t in ai_plan.get('daily_tasks', []) or []:
+        day_offset = int(t.get('day_offset', 0) or 0)
+        due = (now + timedelta(days=day_offset)).date().isoformat()
+        await db.tasks.insert_one({
+            'id': str(uuid.uuid4()),
+            'user_id': user['id'],
+            'goal_id': goal_id,
+            'title': t.get('title', 'Task'),
+            'priority': t.get('priority', 'medium'),
+            'est_minutes': t.get('est_minutes', 30),
+            'due_date': due,
+            'completed': False,
+            'completed_at': None,
+            'created_at': now.isoformat(),
+        })
+
+    updated = await db.goals.find_one({'id': goal_id, 'user_id': user['id']}, {'_id': 0})
+    return updated
