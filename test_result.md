@@ -213,7 +213,48 @@ backend:
         agent: "testing"
         comment: "All 8 live-backend assertions PASS against https://goal-pilot-ai.preview.emergentagent.com/api. (1) GET /api/notifications/prefs without token -> 401. (2) Fresh user (notif_fresh_<uuid>@goalpilot.ai, registered on-the-fly) GET returns exactly {'morning': True, 'streak': True}. (3) PATCH {'morning': false} -> 200 {'morning': false, 'streak': true}; subsequent GET confirms persistence. (4) PATCH {'streak': false} (on user now with morning=false) -> 200 {'morning': false, 'streak': false} (partial merge retained morning=false). (5) PATCH {'morning': true, 'streak': true} -> 200 defaults restored. (6) PATCH with empty body {} -> 200 and returns current prefs unchanged {'morning': true, 'streak': true}. (7) PATCH without Authorization header -> 401. Scheduler integration verified via direct async call to services.scheduler._build_user_message: user with {'morning': False, 'streak': False} returned None; user with {'morning': True, 'streak': False} and no history also returned None (streak_start correctly gated by streak_on); user with both True + no history returned a streak_start push message. notification_prefs is correctly wired end-to-end into the daily push job."
 
-  - task: "Cancel subscription endpoint (POST /api/subscription/cancel) + cancellation email"
+  - task: "AI plan generation via direct Anthropic SDK (fix for Emergent budget exhaustion)"
+    implemented: true
+    working: true
+    file: "/app/backend/services/ai.py + /app/backend/routes/goals.py + /app/backend/.env"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: |
+          BUG: AI plan generation was silently failing with empty {milestones:[], weekly_plan:[], daily_tasks:[]} due to Emergent universal LLM key budget exceeded.
+          FIX: ANTHROPIC_API_KEY in backend/.env, services/ai.py calls AsyncAnthropic.messages.create directly. routes/goals.py returns 503 on AI failure (no empty goal).
+      - working: true
+        agent: "testing"
+        comment: |
+          E2E UI verification (iPhone 12 viewport 390x844) on http://localhost:3000 — ALL 4 FLOWS PASS.
+          Flow 1 — Login: tester@goalpilot.ai / Test@1234 → dashboard renders with greeting, stats, today plan section. ✅
+          Flow 2 — AI plan (THE BUG FIX): Created goal "Run a 10K race in 12 weeks" (deadline 2026-07-30, beginner, 5h/wk). After Generate AI Plan, navigated to /goal/<id>. Goal detail screen shows:
+            • AI Summary (multi-sentence, ~340 chars): "In the next 12 weeks, you'll transform from a beginner to a confident 10K runner..."
+            • Why This Works section with substantive paragraph
+            • 5 milestones listed with dates: Run 20min cont. (5/28) → First 5K (6/18) → 8K nonstop (7/9) → Full 10K training (7/23) → Race day (7/30)
+            • Weekly plan with 12 weeks (Week 1 walk/run intervals through Week 12). Detail body length 3565 chars; 12 "week N" matches.
+          Dashboard now shows Active goals=1, "Today's Action Plan" with 2 real tasks ("Complete your first walk/run interval...", "Schedule your weekly training days...") and a streak nudge with concrete task. NO "No tasks for today" placeholder. Bug fix CONFIRMED end-to-end.
+          Flow 3 — Profile: Avatar, "Tester", tester@goalpilot.ai, FREE PLAN badge present. profile-cancel-sub-btn count=0 (correctly hidden for free user). Privacy/Terms/Refund rows all present and tappable. Privacy Policy renders with markdown content (2436 chars, includes effective date, GDPR section, data subject rights). "Delete account" red button at bottom present (NOT tapped). ✅
+          Flow 4 — Spanish locale: Switched to Español. Verified translations: Perfil, Política de privacidad, Términos del servicio, Política de reembolsos, Eliminar cuenta, plus tabs Hoy/Metas/Revisión/Perfil. Switched back to English (US). ✅
+          No console errors observed.
+
+  - task: "Auto-translate new feature strings to all 7 supported locales"
+    implemented: true
+    working: true
+    file: "/app/frontend/src/i18n/{es,fr,cs,sk,ru,zh-CN}.ts (en-GB inherits via spread)"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: |
+          Added translations for 12 new keys to es/fr/cs/sk/ru/zh-CN: cancel_subscription, cancel_subscription_confirm, cancelled, cancelled_msg, cancel_failed, delete_account, delete_account_confirm, delete_account_failed, legal, privacy_policy, terms_of_service, refund_policy. en-GB inherits from en-US automatically via spread.
+
+
     implemented: true
     working: true
     file: "/app/backend/routes/checkout.py + /app/backend/services/email.py + /app/frontend/app/(tabs)/profile.tsx"

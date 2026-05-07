@@ -1,10 +1,19 @@
+"""AI plan generation service.
+
+Prefers a direct Anthropic SDK call when ANTHROPIC_API_KEY is set (no proxy budget cap).
+Falls back to emergentintegrations LlmChat (Emergent universal key proxy) otherwise.
+"""
 import json
 import logging
+import os
 from datetime import datetime, timezone, date
-from emergentintegrations.llm.chat import LlmChat, UserMessage
+
 from core.config import EMERGENT_LLM_KEY, LOCALE_LANGUAGE_NAMES
 
 logger = logging.getLogger(__name__)
+
+ANTHROPIC_KEY = os.environ.get('ANTHROPIC_API_KEY', '').strip()
+ANTHROPIC_MODEL = os.environ.get('ANTHROPIC_MODEL', 'claude-sonnet-4-5-20250929')
 
 
 def lang_instruction(locale: str) -> str:
@@ -31,6 +40,39 @@ def _days_between(start_iso: str, end_iso: str) -> int:
         return 0
 
 
+async def _llm_complete(system_msg: str, prompt: str, session_id: str, max_tokens: int = 4096) -> str:
+    """Run the LLM. Prefer direct Anthropic SDK; fallback to Emergent proxy.
+
+    Raises on failure so callers can surface a clear error to the user.
+    """
+    if ANTHROPIC_KEY:
+        # Direct Anthropic SDK call (async)
+        from anthropic import AsyncAnthropic
+        client = AsyncAnthropic(api_key=ANTHROPIC_KEY)
+        msg = await client.messages.create(
+            model=ANTHROPIC_MODEL,
+            max_tokens=max_tokens,
+            system=system_msg,
+            messages=[{'role': 'user', 'content': prompt}],
+        )
+        # msg.content is a list of content blocks; concat text
+        parts = []
+        for block in msg.content:
+            text = getattr(block, 'text', None)
+            if text:
+                parts.append(text)
+        return ''.join(parts)
+
+    # Fallback to emergent proxy
+    from emergentintegrations.llm.chat import LlmChat, UserMessage
+    chat = LlmChat(
+        api_key=EMERGENT_LLM_KEY,
+        session_id=session_id,
+        system_message=system_msg,
+    ).with_model('anthropic', ANTHROPIC_MODEL)
+    return await chat.send_message(UserMessage(text=prompt))
+
+
 async def generate_ai_plan(goal: dict, locale: str = 'en-US') -> dict:
     session_id = f"goal-{goal['id']}"
     today_iso = datetime.now(timezone.utc).date().isoformat()
@@ -44,11 +86,6 @@ async def generate_ai_plan(goal: dict, locale: str = 'en-US') -> dict:
         'Be specific, motivating and realistic. Return ONLY valid JSON, no markdown. '
         + lang_instruction(locale)
     )
-    chat = LlmChat(
-        api_key=EMERGENT_LLM_KEY,
-        session_id=session_id,
-        system_message=system_msg,
-    ).with_model('anthropic', 'claude-sonnet-4-5-20250929')
 
     prompt = f"""Create a practical plan for this goal.
 
@@ -93,36 +130,31 @@ Generate 3-5 milestones spread across the {weeks_available} weeks (do not stack 
 Generate exactly {weeks_available} weeks of weekly_plan (or {weeks_available if weeks_available <= 12 else 12} if more than 12 weeks — group later weeks).
 Generate 5-7 daily_tasks starting day_offset 0 (today).
 """
-    response = await chat.send_message(UserMessage(text=prompt))
+    response = await _llm_complete(system_msg, prompt, session_id, max_tokens=4096)
     text = _strip_fences(response)
     try:
         plan = json.loads(text)
-        # Defensive: ensure feasibility field present
-        plan.setdefault('feasibility', 'ok')
-        plan.setdefault('suggested_deadline_iso', goal['deadline'])
-        plan.setdefault('feasibility_reason', '')
-        return plan
     except Exception as e:
         logger.error(f'AI parse error: {e}\nRaw: {text[:500]}')
-        return {
-            'summary': 'Your AI plan is being prepared. Keep going!',
-            'why_it_works': 'Consistent small actions compound into results.',
-            'feasibility': 'ok',
-            'feasibility_reason': '',
-            'suggested_deadline_iso': goal['deadline'],
-            'milestones': [],
-            'weekly_plan': [],
-            'daily_tasks': [],
-        }
+        # Re-raise so caller surfaces a clear 503 to the user instead of empty stub
+        raise RuntimeError('AI returned malformed JSON') from e
+
+    # Validate the plan actually has content (defend against the silent-empty bug)
+    milestones = plan.get('milestones') or []
+    weekly_plan = plan.get('weekly_plan') or []
+    daily_tasks = plan.get('daily_tasks') or []
+    if not milestones and not weekly_plan and not daily_tasks:
+        raise RuntimeError('AI returned an empty plan (no milestones/weeks/tasks)')
+
+    plan.setdefault('feasibility', 'ok')
+    plan.setdefault('suggested_deadline_iso', goal['deadline'])
+    plan.setdefault('feasibility_reason', '')
+    return plan
 
 
 async def generate_weekly_review(user_id: str, locale: str, completed: int, missed: int, total_due: int, goal_titles: str, today_s: str):
     try:
-        chat = LlmChat(
-            api_key=EMERGENT_LLM_KEY,
-            session_id=f'review-{user_id}-{today_s}',
-            system_message='You are an AI accountability coach. Be warm, specific, motivating. Return ONLY JSON. ' + lang_instruction(locale),
-        ).with_model('anthropic', 'claude-sonnet-4-5-20250929')
+        system_msg = 'You are an AI accountability coach. Be warm, specific, motivating. Return ONLY JSON. ' + lang_instruction(locale)
         prompt = f"""User progress last 7 days:
 - Tasks completed: {completed}
 - Tasks missed: {missed}
@@ -131,7 +163,7 @@ async def generate_weekly_review(user_id: str, locale: str, completed: int, miss
 
 Return JSON:
 {{\"summary\": \"2-3 sentences celebrating wins & acknowledging misses\", \"suggestion\": \"1 specific actionable focus for next week\"}}"""
-        resp = await chat.send_message(UserMessage(text=prompt))
+        resp = await _llm_complete(system_msg, prompt, f'review-{user_id}-{today_s}', max_tokens=512)
         text = _strip_fences(resp)
         parsed = json.loads(text)
         return parsed.get('summary', ''), parsed.get('suggestion', '')

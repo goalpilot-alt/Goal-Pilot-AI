@@ -88,7 +88,11 @@ async def create_goal(
         goal_doc['plan'] = ai_plan
     except Exception as e:
         logger.error(f'AI generation failed: {e}')
-        goal_doc['plan'] = {'summary': 'AI plan generation failed', 'milestones': [], 'weekly_plan': [], 'daily_tasks': []}
+        # Do NOT create an empty goal — surface a clear error so user can retry
+        raise HTTPException(
+            status_code=503,
+            detail="We couldn't generate your plan right now. Please try again in a moment.",
+        )
 
     await db.goals.insert_one(goal_doc.copy())
 
