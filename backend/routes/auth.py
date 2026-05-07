@@ -1,7 +1,6 @@
 import uuid
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException
-
 from core.auth import (
     create_access_token, get_current_user, hash_password, verify_password,
 )
@@ -67,3 +66,32 @@ async def set_timezone(req: TimezoneReq, user: dict = Depends(get_current_user))
         raise HTTPException(status_code=400, detail='Invalid timezone')
     await db.users.update_one({'id': user['id']}, {'$set': {'timezone': req.timezone}})
     return {'ok': True, 'timezone': req.timezone}
+
+
+@router.delete('/auth/account')
+async def delete_account(user: dict = Depends(get_current_user)):
+    """Hard-delete the user and all owned data.
+
+    payment_transactions are kept (legally required for accounting) but anonymized:
+    user_id and user_email are scrubbed to 'deleted_user'.
+    """
+    uid = user['id']
+    # Anonymize payment records (required for accounting/tax)
+    await db.payment_transactions.update_many(
+        {'user_id': uid},
+        {'$set': {
+            'user_id': 'deleted_user',
+            'user_email': 'deleted_user',
+            'metadata.user_id': 'deleted_user',
+            'metadata.user_email': 'deleted_user',
+            'anonymized_at': datetime.now(timezone.utc).isoformat(),
+        }},
+    )
+    # Hard-delete everything else owned by the user
+    await db.tasks.delete_many({'user_id': uid})
+    await db.goals.delete_many({'user_id': uid})
+    await db.push_tokens.delete_many({'user_id': uid})
+    await db.idempotency_keys.delete_many({'user_id': uid})
+    await db.push_log.delete_many({'user_id': uid})
+    res = await db.users.delete_one({'id': uid})
+    return {'ok': True, 'deleted_user': res.deleted_count == 1}

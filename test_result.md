@@ -214,6 +214,18 @@ backend:
         comment: "All 8 live-backend assertions PASS against https://goal-pilot-ai.preview.emergentagent.com/api. (1) GET /api/notifications/prefs without token -> 401. (2) Fresh user (notif_fresh_<uuid>@goalpilot.ai, registered on-the-fly) GET returns exactly {'morning': True, 'streak': True}. (3) PATCH {'morning': false} -> 200 {'morning': false, 'streak': true}; subsequent GET confirms persistence. (4) PATCH {'streak': false} (on user now with morning=false) -> 200 {'morning': false, 'streak': false} (partial merge retained morning=false). (5) PATCH {'morning': true, 'streak': true} -> 200 defaults restored. (6) PATCH with empty body {} -> 200 and returns current prefs unchanged {'morning': true, 'streak': true}. (7) PATCH without Authorization header -> 401. Scheduler integration verified via direct async call to services.scheduler._build_user_message: user with {'morning': False, 'streak': False} returned None; user with {'morning': True, 'streak': False} and no history also returned None (streak_start correctly gated by streak_on); user with both True + no history returned a streak_start push message. notification_prefs is correctly wired end-to-end into the daily push job."
 
 frontend:
+  - task: "Pre-AI feasibility heuristic in New Goal flow + Legal policies (Privacy/Terms/Refund) + GDPR account deletion"
+    implemented: true
+    working: true
+    file: "Multiple — /app/backend/routes/auth.py + /app/frontend/src/feasibility.ts + /app/frontend/src/legal/policies.ts + /app/frontend/app/legal/[kind].tsx + /app/frontend/app/(tabs)/profile.tsx + /app/frontend/app/goal/new.tsx + /app/frontend/src/AuthContext.tsx + /app/frontend/src/i18n/en-US.ts"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "Three-feature delivery.\n(1) PRE-AI FEASIBILITY HEURISTIC: New file src/feasibility.ts evaluates (deadline, hours_per_week, level) instantly with rule-based thresholds (per-level minimum hours: beginner 30 / intermediate 20 / advanced 10; floors: <7 days = unrealistic, <5 total hours = unrealistic). Shown as amber/red banner inside step 4 of New Goal flow with 'Apply suggested deadline' one-tap fix \u2014 user adjusts deadline BEFORE Claude is called. Verified live: 5-day marathon goal + beginner triggers 'unrealistic' banner with suggested deadline 30 days out.\n(2) LEGAL POLICIES: src/legal/policies.ts has full Privacy / Terms / Refund Policy texts written for operator='GoalPilot', contact='goalpilot@goal-pilot.com', jurisdiction='Czech Republic'. Compliant with GDPR (16+ age, full data subject rights, EU 14-day refund withdrawal, AI processor disclosure for Anthropic). Single dynamic route /legal/[kind] renders any of 3 policies with markdown-style ** bold ** and headings. Reachable from Profile -> Legal section (3 rows: Privacy, Terms, Refund). Verified visually \u2014 renders cleanly with formatted sections.\n(3) ACCOUNT DELETION (GDPR Article 17): DELETE /api/auth/account performs hard-delete of user, goals, tasks, push_tokens, idempotency_keys, push_log; payment_transactions are kept and ANONYMIZED (user_id and email scrubbed) for 10-yr Czech accounting retention requirement. Frontend: AuthContext.deleteAccount; Profile shows red 'Delete account' button at bottom that opens confirmation alert before calling the endpoint and redirecting to welcome. Visible & wired."
+
   - task: "AI plan respects start date + deadline + feasibility detection + replan"
     implemented: true
     working: true

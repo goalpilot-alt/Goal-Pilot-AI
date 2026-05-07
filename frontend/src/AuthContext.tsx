@@ -11,6 +11,7 @@ type AuthState = {
   register: (email: string, password: string, name: string) => Promise<void>;
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
+  deleteAccount: () => Promise<void>;
 };
 
 const Ctx = createContext<AuthState | null>(null);
@@ -76,7 +77,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch {}
   }
 
-  return <Ctx.Provider value={{ user, loading, login, register, logout, refreshUser }}>{children}</Ctx.Provider>;
+  async function deleteAccount() {
+    try { await api.delete('/auth/account'); } catch {}
+    await clearToken();
+    setUser(null);
+  }
+
+  return <Ctx.Provider value={{ user, loading, login, register, logout, refreshUser, deleteAccount }}>{children}</Ctx.Provider>;
 }
 
 export function useAuth() {

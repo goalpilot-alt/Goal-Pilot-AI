@@ -179,9 +179,25 @@ export const en_US = {
   suggested_deadline_label: 'Suggested deadline',
   keep_my_deadline: 'Keep my deadline',
   use_suggested: 'Use suggested',
+  apply_suggested_deadline: 'Apply suggested deadline',
   plan_updated: 'Plan updated',
   plan_updated_msg: 'Your milestones, weekly plan and tasks have been regenerated for the new deadline.',
   replan_failed: "Couldn't update the plan. Please try again.",
+  feas_reason_under_week: "Less than 7 days isn't enough to deliver a meaningful plan.",
+  feas_reason_too_few_hours: "With your current weekly hours you'll have very little study time before the deadline.",
+  feas_reason_short_for_level: "For a {{level}} this time-frame is likely too short \u2014 you may need significantly more practice hours.",
+  feas_reason_tight: "It's doable, but you'll be cutting it close. Consider stretching the deadline or adding hours.",
+
+  // Legal
+  legal: 'Legal',
+  privacy_policy: 'Privacy Policy',
+  terms_of_service: 'Terms of Service',
+  refund_policy: 'Refund Policy',
+
+  // Account deletion
+  delete_account: 'Delete account',
+  delete_account_confirm: 'This will permanently delete your account, goals, tasks and all associated data. Payment records are kept anonymized for accounting. This cannot be undone.',
+  delete_account_failed: "Couldn't delete the account. Please try again or contact support.",
 
   // Notifications screen
   notifications: 'Notifications',

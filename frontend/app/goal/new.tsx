@@ -6,6 +6,7 @@ import { Feather } from '@expo/vector-icons';
 import { colors, spacing, radii, shadows } from '../../src/theme';
 import { api } from '../../src/api';
 import { useI18n } from '../../src/i18n/I18nProvider';
+import { evaluateFeasibility, addDays } from '../../src/feasibility';
 
 const HOURS = [3, 5, 10, 15, 20];
 
@@ -150,6 +151,38 @@ export default function NewGoal() {
                   </TouchableOpacity>
                 ))}
               </View>
+
+              {(() => {
+                const f = evaluateFeasibility({ deadline, hoursPerWeek: hours, level });
+                if (f.level === 'ok') return null;
+                const isUnreal = f.level === 'unrealistic';
+                return (
+                  <View
+                    style={[styles.preFeas, { backgroundColor: isUnreal ? 'rgba(239,68,68,0.1)' : 'rgba(245,158,11,0.1)', borderColor: isUnreal ? 'rgba(239,68,68,0.35)' : 'rgba(245,158,11,0.35)' }]}
+                    testID="prefeas-warning"
+                  >
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                      <Feather name="alert-triangle" size={14} color={isUnreal ? colors.error : colors.warning} />
+                      <Text style={{ color: isUnreal ? colors.error : colors.warning, fontWeight: '800', fontSize: 13, letterSpacing: 0.5 }}>
+                        {t(isUnreal ? 'deadline_unrealistic' : 'deadline_tight')}
+                      </Text>
+                    </View>
+                    <Text style={styles.preFeasMsg}>{t(f.reasonKey || 'feas_reason_tight')}</Text>
+                    <Text style={styles.preFeasSuggest}>
+                      {t('suggested_deadline_label')}: <Text style={{ fontWeight: '700', color: colors.textPrimary }}>{addDays(f.suggestedDays)}</Text>
+                    </Text>
+                    <TouchableOpacity
+                      onPress={() => setDeadline(addDays(f.suggestedDays))}
+                      style={styles.preFeasBtn}
+                      testID="prefeas-apply-btn"
+                    >
+                      <Feather name="zap" size={13} color="#fff" />
+                      <Text style={styles.preFeasBtnText}>{t('apply_suggested_deadline')}</Text>
+                    </TouchableOpacity>
+                  </View>
+                );
+              })()}
+
             </>
           )}
         </ScrollView>
@@ -207,4 +240,9 @@ const styles = StyleSheet.create({
   bottomBar: { padding: spacing.lg, borderTopWidth: 1, borderTopColor: colors.border },
   nextBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.sm, backgroundColor: colors.primary, paddingVertical: 16, borderRadius: radii.full, boxShadow: shadows.primaryMd },
   nextText: { color: '#fff', fontWeight: '700', fontSize: 16 },
+  preFeas: { marginTop: spacing.lg, padding: spacing.md, borderRadius: radii.md, borderWidth: 1 },
+  preFeasMsg: { color: colors.textPrimary, fontSize: 13, lineHeight: 19, marginBottom: spacing.sm },
+  preFeasSuggest: { color: colors.textSecondary, fontSize: 12, marginBottom: spacing.sm },
+  preFeasBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, alignSelf: 'flex-start', paddingVertical: 8, paddingHorizontal: 14, borderRadius: radii.full, backgroundColor: colors.primary },
+  preFeasBtnText: { color: '#fff', fontWeight: '700', fontSize: 12 },
 });

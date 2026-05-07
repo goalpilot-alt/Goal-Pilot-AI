@@ -12,7 +12,7 @@ import { useI18n } from '../../src/i18n/I18nProvider';
 const BACKEND = process.env.EXPO_PUBLIC_BACKEND_URL;
 
 export default function Profile() {
-  const { user, logout } = useAuth();
+  const { user, logout, deleteAccount } = useAuth();
   const router = useRouter();
   const { t, locale, supported } = useI18n();
   const [syncing, setSyncing] = useState(false);
@@ -38,6 +38,24 @@ export default function Profile() {
     } catch {
       Alert.alert(t('oops'), t('could_not_calendar'));
     } finally { setSyncing(false); }
+  }
+
+  async function confirmDelete() {
+    Alert.alert(t('delete_account'), t('delete_account_confirm'), [
+      { text: t('cancel'), style: 'cancel' },
+      {
+        text: t('delete_account'),
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await deleteAccount();
+            router.replace('/');
+          } catch {
+            Alert.alert(t('oops'), t('delete_account_failed'));
+          }
+        },
+      },
+    ]);
   }
 
   return (
@@ -100,7 +118,30 @@ export default function Profile() {
           <Text style={styles.logoutText}>{t('log_out')}</Text>
         </TouchableOpacity>
 
-        <Text style={styles.footer}>GoalPilot AI · v1.1</Text>
+        <Text style={[styles.sectionTitle, { marginTop: spacing.md }]}>{t('legal')}</Text>
+        <TouchableOpacity style={styles.row} onPress={() => router.push('/legal/privacy')} testID="profile-privacy-btn">
+          <Feather name="shield" size={18} color={colors.textPrimary} />
+          <Text style={[styles.rowText, { flex: 1 }]}>{t('privacy_policy')}</Text>
+          <Feather name="chevron-right" size={16} color={colors.textTertiary} />
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.row} onPress={() => router.push('/legal/terms')} testID="profile-terms-btn">
+          <Feather name="file-text" size={18} color={colors.textPrimary} />
+          <Text style={[styles.rowText, { flex: 1 }]}>{t('terms_of_service')}</Text>
+          <Feather name="chevron-right" size={16} color={colors.textTertiary} />
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.row} onPress={() => router.push('/legal/refund')} testID="profile-refund-btn">
+          <Feather name="rotate-ccw" size={18} color={colors.textPrimary} />
+          <Text style={[styles.rowText, { flex: 1 }]}>{t('refund_policy')}</Text>
+          <Feather name="chevron-right" size={16} color={colors.textTertiary} />
+        </TouchableOpacity>
+
+        <TouchableOpacity style={styles.dangerBtn} onPress={confirmDelete} testID="profile-delete-account-btn">
+          <Feather name="trash-2" size={16} color={colors.error} />
+          <Text style={styles.dangerText}>{t('delete_account')}</Text>
+        </TouchableOpacity>
+
+
+        <Text style={styles.footer}>GoalPilot AI · v1.2</Text>
       </ScrollView>
     </SafeAreaView>
   );
@@ -132,5 +173,7 @@ const styles = StyleSheet.create({
   knobOn: { transform: [{ translateX: 18 }] },
   logout: { flexDirection: 'row', alignItems: 'center', gap: 8, justifyContent: 'center', paddingVertical: 14, marginTop: spacing.md },
   logoutText: { color: colors.error, fontWeight: '700' },
+  dangerBtn: { flexDirection: 'row', alignItems: 'center', gap: 8, justifyContent: 'center', paddingVertical: 12, marginTop: spacing.lg, borderWidth: 1, borderColor: 'rgba(239,68,68,0.4)', borderRadius: radii.full },
+  dangerText: { color: colors.error, fontWeight: '700', fontSize: 13 },
   footer: { color: colors.textTertiary, fontSize: 12, textAlign: 'center', marginTop: spacing.md },
 });
