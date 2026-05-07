@@ -12,7 +12,7 @@ import { useI18n } from '../../src/i18n/I18nProvider';
 const BACKEND = process.env.EXPO_PUBLIC_BACKEND_URL;
 
 export default function Profile() {
-  const { user, logout, deleteAccount } = useAuth();
+  const { user, logout, deleteAccount, refreshUser } = useAuth();
   const router = useRouter();
   const { t, locale, supported } = useI18n();
   const [syncing, setSyncing] = useState(false);
@@ -40,8 +40,26 @@ export default function Profile() {
     } finally { setSyncing(false); }
   }
 
-  async function confirmDelete() {
-    Alert.alert(t('delete_account'), t('delete_account_confirm'), [
+  async function confirmCancel() {
+    Alert.alert(t('cancel_subscription'), t('cancel_subscription_confirm'), [
+      { text: t('cancel'), style: 'cancel' },
+      {
+        text: t('cancel_subscription'),
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await api.post('/subscription/cancel');
+            await refreshUser();
+            Alert.alert(t('cancelled'), t('cancelled_msg'));
+          } catch {
+            Alert.alert(t('oops'), t('cancel_failed'));
+          }
+        },
+      },
+    ]);
+  }
+
+  async function confirmDelete() {    Alert.alert(t('delete_account'), t('delete_account_confirm'), [
       { text: t('cancel'), style: 'cancel' },
       {
         text: t('delete_account'),
@@ -83,6 +101,13 @@ export default function Profile() {
           </View>
           <Feather name="arrow-right" size={22} color="#fff" />
         </TouchableOpacity>
+
+        {plan !== 'free' ? (
+          <TouchableOpacity style={styles.cancelSubBtn} onPress={confirmCancel} testID="profile-cancel-sub-btn">
+            <Feather name="x-circle" size={16} color={colors.warning} />
+            <Text style={styles.cancelSubText}>{t('cancel_subscription')}</Text>
+          </TouchableOpacity>
+        ) : null}
 
         <Text style={styles.sectionTitle}>{t('settings')}</Text>
 
@@ -175,5 +200,7 @@ const styles = StyleSheet.create({
   logoutText: { color: colors.error, fontWeight: '700' },
   dangerBtn: { flexDirection: 'row', alignItems: 'center', gap: 8, justifyContent: 'center', paddingVertical: 12, marginTop: spacing.lg, borderWidth: 1, borderColor: 'rgba(239,68,68,0.4)', borderRadius: radii.full },
   dangerText: { color: colors.error, fontWeight: '700', fontSize: 13 },
+  cancelSubBtn: { flexDirection: 'row', alignItems: 'center', gap: 8, justifyContent: 'center', paddingVertical: 12, marginBottom: spacing.lg, borderWidth: 1, borderColor: 'rgba(245,158,11,0.4)', borderRadius: radii.full },
+  cancelSubText: { color: colors.warning, fontWeight: '700', fontSize: 13 },
   footer: { color: colors.textTertiary, fontSize: 12, textAlign: 'center', marginTop: spacing.md },
 });

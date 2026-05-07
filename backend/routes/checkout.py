@@ -175,3 +175,37 @@ async def upgrade(plan: str, billing: str = 'monthly', user: dict = Depends(get_
         {'$set': {'plan': plan, 'billing': billing, 'upgraded_at': datetime.now(timezone.utc).isoformat()}},
     )
     return {'ok': True, 'plan': plan, 'billing': billing}
+
+
+@router.post('/subscription/cancel')
+async def cancel_subscription(user: dict = Depends(get_current_user)):
+    """Downgrade the user to the Free plan immediately.
+
+    Note: the current Stripe integration uses one-time payments, so there is no
+    recurring subscription to cancel at Stripe \u2014 the user simply loses paid features.
+    Emails a confirmation. Idempotent: free users can call this safely.
+    """
+    current_plan = user.get('plan', 'free')
+    if current_plan == 'free':
+        return {'ok': True, 'plan': 'free', 'already_free': True}
+
+    await db.users.update_one(
+        {'id': user['id']},
+        {
+            '$set': {
+                'plan': 'free',
+                'cancelled_at': datetime.now(timezone.utc).isoformat(),
+                'previous_plan': current_plan,
+            },
+            '$unset': {'billing': ''},
+        },
+    )
+
+    # Fail-soft email
+    try:
+        from services.email import send_subscription_cancelled_email
+        await send_subscription_cancelled_email(to=user['email'], name=user.get('name'), plan=current_plan)
+    except Exception as e:
+        logger.error(f'Cancellation email failed: {e}')
+
+    return {'ok': True, 'plan': 'free', 'previous_plan': current_plan}

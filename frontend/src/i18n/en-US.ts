@@ -199,6 +199,13 @@ export const en_US = {
   delete_account_confirm: 'This will permanently delete your account, goals, tasks and all associated data. Payment records are kept anonymized for accounting. This cannot be undone.',
   delete_account_failed: "Couldn't delete the account. Please try again or contact support.",
 
+  // Subscription cancel
+  cancel_subscription: 'Cancel subscription',
+  cancel_subscription_confirm: 'Cancel your paid plan and downgrade to Free? Your goals and progress are kept; only the active-goal cap (1) applies again. You can re-upgrade at any time.',
+  cancelled: 'Subscription cancelled',
+  cancelled_msg: "You're now on the Free plan. We've sent a confirmation email.",
+  cancel_failed: "Couldn't cancel right now. Please try again.",
+
   // Notifications screen
   notifications: 'Notifications',
   daily_pushes: 'Daily pushes',

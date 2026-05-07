@@ -76,6 +76,8 @@ async def delete_account(user: dict = Depends(get_current_user)):
     user_id and user_email are scrubbed to 'deleted_user'.
     """
     uid = user['id']
+    email = user.get('email')
+    name = user.get('name')
     # Anonymize payment records (required for accounting/tax)
     await db.payment_transactions.update_many(
         {'user_id': uid},
@@ -94,4 +96,14 @@ async def delete_account(user: dict = Depends(get_current_user)):
     await db.idempotency_keys.delete_many({'user_id': uid})
     await db.push_log.delete_many({'user_id': uid})
     res = await db.users.delete_one({'id': uid})
+
+    # Send confirmation email (fail-soft \u2014 never block deletion on email)
+    if email:
+        try:
+            from services.email import send_account_deleted_email
+            await send_account_deleted_email(to=email, name=name)
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).error(f'Account deletion email failed: {e}')
+
     return {'ok': True, 'deleted_user': res.deleted_count == 1}
