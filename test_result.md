@@ -213,6 +213,56 @@ backend:
         agent: "testing"
         comment: "All 8 live-backend assertions PASS against https://goal-pilot-ai.preview.emergentagent.com/api. (1) GET /api/notifications/prefs without token -> 401. (2) Fresh user (notif_fresh_<uuid>@goalpilot.ai, registered on-the-fly) GET returns exactly {'morning': True, 'streak': True}. (3) PATCH {'morning': false} -> 200 {'morning': false, 'streak': true}; subsequent GET confirms persistence. (4) PATCH {'streak': false} (on user now with morning=false) -> 200 {'morning': false, 'streak': false} (partial merge retained morning=false). (5) PATCH {'morning': true, 'streak': true} -> 200 defaults restored. (6) PATCH with empty body {} -> 200 and returns current prefs unchanged {'morning': true, 'streak': true}. (7) PATCH without Authorization header -> 401. Scheduler integration verified via direct async call to services.scheduler._build_user_message: user with {'morning': False, 'streak': False} returned None; user with {'morning': True, 'streak': False} and no history also returned None (streak_start correctly gated by streak_on); user with both True + no history returned a streak_start push message. notification_prefs is correctly wired end-to-end into the daily push job."
 
+  - task: "Cancel subscription endpoint (POST /api/subscription/cancel) + cancellation email"
+    implemented: true
+    working: true
+    file: "/app/backend/routes/checkout.py + /app/backend/services/email.py + /app/frontend/app/(tabs)/profile.tsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: |
+          NEW endpoint POST /api/subscription/cancel (auth required). Behaviour:
+          - If user.plan == 'free' -> returns {ok:true, plan:'free', already_free:true} (idempotent, no email).
+          - Else -> sets plan='free', cancelled_at, previous_plan; unsets billing; sends cancellation email via Resend (services/email.send_subscription_cancelled_email). Email failure is fail-soft.
+          Frontend: Profile shows amber 'Cancel subscription' button only when plan != 'free'. Tapping opens confirm Alert; on confirm calls /subscription/cancel then refreshUser().
+      - working: true
+        agent: "testing"
+        comment: |
+          Section A of backend_test.py: 10/10 assertions PASS against live backend.
+          (A.1) POST /api/subscription/cancel without Authorization -> 401.
+          (A.2) Fresh free user (cancel_free_<uuid>@goalpilot.ai) POST -> 200 body={'ok':True,'plan':'free','already_free':True}; GET /auth/me still plan='free' (no email sent on already_free branch — correct).
+          (A.3) Fresh user upgraded directly in Mongo to {plan:'pro', billing:'monthly'}. /auth/me confirmed plan='pro'. POST /subscription/cancel -> 200 body={'ok':True,'plan':'free','previous_plan':'pro'}. /auth/me now plan='free'. Mongo users doc has cancelled_at set (ISO timestamp), previous_plan='pro', and 'billing' field unset (verified absent via find_one). Backend logs show cancellation email was attempted via Resend — it returned 403 sandbox ('You can only send testing emails to your own email address') which is the expected Resend-free-tier behaviour; endpoint still returned 200 as fail-soft. No 500s logged.
+          (A.4) Calling POST /subscription/cancel again on the now-free user -> 200 body={'ok':True,'plan':'free','already_free':True} (idempotent).
+          Email integration is wired correctly — the route imports send_subscription_cancelled_email and fail-soft catches Resend errors. To deliver to arbitrary recipients in production, a domain must be verified in Resend (currently only onboarding@resend.dev sandbox is usable).
+
+  - task: "Account deletion email confirmation (DELETE /api/auth/account)"
+    implemented: true
+    working: true
+    file: "/app/backend/routes/auth.py + /app/backend/services/email.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: |
+          DELETE /api/auth/account already hard-deletes user data + anonymizes payment_transactions.
+          NEW: after deletion, calls services/email.send_account_deleted_email(to=email, name=name).
+          Email is fail-soft (errors logged but never block deletion). Verify endpoint still returns 200 {ok:true, deleted_user:true}.
+      - working: true
+        agent: "testing"
+        comment: |
+          Section B of backend_test.py: 12/12 assertions PASS against live backend.
+          (B.1) DELETE /api/auth/account without Authorization -> 401.
+          (B.2) Fresh user (delete_<uuid>@goalpilot.ai) registered. Created one real goal via POST /api/goals (title='Learn Spanish A1', current_level='beginner', hours_per_week=5, deadline=2026-09-30) — Claude plan generated successfully with 7 daily_tasks (cascade test now exercises real data, not vacuous). Inserted one fake payment_transactions doc with session_id=cs_test_anon_<uuid>, user_id=<user>, user_email=<email>. Inserted one push_tokens, one idempotency_keys, and one push_log row for the same user_id.
+          DELETE /api/auth/account -> 200 body={'ok':True,'deleted_user':True}.
+          Mongo verification post-delete: users doc gone; goals count=0; tasks count=0; push_tokens count=0; idempotency_keys count=0; push_log count=0. payment_transactions row still exists BUT user_id='deleted_user', user_email='deleted_user', anonymized_at ISO timestamp present.
+          (B.2g) GET /auth/me with the now-deleted user's token returned 401 (not 200).
+          Backend logs show send_account_deleted_email was attempted — Resend returned 403 sandbox validation_error ('You can only send testing emails to your own email address'). That is expected Resend-free-tier behaviour (no verified domain); endpoint did NOT throw or crash, and no 500 was emitted — fail-soft working as designed. To deliver real emails, main agent must verify a domain in Resend.
+
 frontend:
   - task: "Pre-AI feasibility heuristic in New Goal flow + Legal policies (Privacy/Terms/Refund) + GDPR account deletion"
     implemented: true
@@ -405,27 +455,44 @@ agent_communication:
 
   - agent: "testing"
     message: |
-      All 27 backend assertions PASS against live preview backend.
-      
-      Section 1 — Modular refactor smoke regression (fresh user smoke_<uuid>@goalpilot.ai): 18/18
-      endpoints OK with expected status codes (register, login, /me, /auth/locale es, POST/GET/DELETE
-      /goals, GET /goals/{id}, GET /tasks, PATCH /tasks/{id}, /tasks/missed, /dashboard/stats with
-      streak/today/active_goals, /nudge, /review/weekly with AI summary, /calendar/url + /calendar/export.ics
-      text/calendar 2285 bytes, /checkout/session pro_monthly returns url+session_id, /webhook/stripe
-      bad sig -> 400, DELETE /goals/{id}). Modular refactor preserves all behavior.
-      
-      Section 2 — Idempotency-Key on POST /api/goals (fresh user idem_<uuid>): 7/7 assertions PASS.
-      (1) First call with K1 -> 200 + new goal. (2) Same body+K1 retry -> 200, IDENTICAL goal id (replay,
-      not duplicate). Backend logged 'Idempotent goal replay for user=... key=...'. (3) No-key second
-      call -> 402 (free plan cap). (4) New key K2 first call -> 402 (cap reached). (5) Same K2 retry
-      -> 402 (idempotent error replay). (6) Mongo db.idempotency_keys has both rows: K1 with
-      status_code=200/response/created_at; K2 with status_code=402/detail/created_at.
-      
-      Section 3 — APScheduler daily push job: NOT triggered (per instructions). Verified wiring via
-      grep on backend.err.log: 'Scheduler started: daily push at 09:00 UTC' present (3 matches across
-      restarts). API root /api/ returns 200, confirming scheduler init does not break startup.
-      
-      No critical issues. STRIPE_WEBHOOK_SECRET still empty in backend/.env (previously noted) — the
-      success path of webhook idempotency cannot be exercised end-to-end without a real signed event,
-      but bad-signature path correctly returns 400 and no state mutation. All 3 current_focus tasks
-      now marked working: true; current_focus cleared. Recommend main agent finalize and ship.
+      Cancel Subscription + Account Deletion email features — 26/26 backend assertions PASS
+      against live preview backend.
+
+      Section A — POST /api/subscription/cancel (10/10):
+        - no-auth -> 401
+        - Fresh free user -> 200 {ok:true, plan:'free', already_free:true}; /me still free
+        - Fresh user manually upgraded in Mongo to plan:pro/billing:monthly; /me confirms plan:pro
+        - POST cancel -> 200 {ok:true, plan:'free', previous_plan:'pro'}; /me now plan:free
+        - Mongo user doc: cancelled_at ISO timestamp SET, previous_plan='pro', billing UNSET
+        - Second cancel on same user -> 200 {already_free:true} (idempotent)
+        - Backend logs: Resend attempted (403 sandbox — expected free-tier behaviour); NO 500s;
+          cancellation endpoint fail-soft works correctly.
+
+      Section B — DELETE /api/auth/account (12/12):
+        - no-auth -> 401
+        - Fresh user created one real goal via POST /api/goals (7 daily_tasks generated by
+          Claude). Inserted fake payment_transactions (session_id=cs_test_anon_<uuid>),
+          push_tokens, idempotency_keys, push_log rows for same user_id
+        - DELETE /auth/account -> 200 {ok:true, deleted_user:true}
+        - Mongo verified: users gone; goals=0; tasks=0; push_tokens=0; idempotency_keys=0;
+          push_log=0
+        - payment_transactions row STILL EXISTS but user_id='deleted_user',
+          user_email='deleted_user', anonymized_at ISO timestamp present — exactly as designed
+        - GET /auth/me with deleted user token -> 401 (not 200)
+        - Backend logs: send_account_deleted_email attempted via Resend (403 sandbox); deletion
+          endpoint did NOT crash, no 500s — fail-soft works correctly.
+
+      Section C — Regression smoke (4/4):
+        - register, login, /auth/me for fresh user all 200
+        - POST /checkout/session pro_monthly origin='https://example.com' -> 200, session_id
+          starts with cs_live_... (Live Stripe confirmed)
+
+      IMPORTANT NOTE for main agent:
+      Resend is currently in FREE SANDBOX MODE — it returns 403 validation_error for any
+      recipient other than the account owner (goalpilot@goal-pilot.com). The backend handles
+      this correctly (fail-soft), but to actually deliver cancellation/deletion emails to real
+      users in production, main agent must VERIFY A DOMAIN in Resend and update EMAIL_FROM
+      in /app/backend/.env to use that verified domain (currently using onboarding@resend.dev
+      sandbox). This is a deployment task, not a code bug.
+
+      Both target tasks now marked working: true. current_focus cleared.
