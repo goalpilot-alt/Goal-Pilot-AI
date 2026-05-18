@@ -99,7 +99,7 @@ Time per week: {goal['hours_per_week']} hours
 
 CRITICAL CONSTRAINTS:
 1. ALL milestone target_date values MUST be between {today_iso} and {goal['deadline']} (inclusive).
-2. weekly_plan length MUST equal the number of weeks available (={weeks_available}). DO NOT exceed.
+2. weekly_plan MUST have AT MOST 12 entries. If the goal spans more than 12 weeks, GROUP the remaining weeks into thematic phases (e.g. "Weeks 13-20: Consolidation") and emit a maximum of 12 phase entries — NEVER emit one entry per week beyond 12.
 3. daily_tasks day_offset values MUST satisfy 0 <= day_offset <= {days_available}.
 4. Assess feasibility: given the user's level, hours_per_week and days_available, is the goal realistically achievable?
    - "ok": plenty of time
@@ -127,10 +127,10 @@ Return JSON with this EXACT shape:
 }}
 
 Generate 3-5 milestones spread across the {weeks_available} weeks (do not stack them all at the end).
-Generate exactly {weeks_available} weeks of weekly_plan (or {weeks_available if weeks_available <= 12 else 12} if more than 12 weeks — group later weeks).
+Generate AT MOST 12 weekly_plan items. If the goal spans more than 12 weeks, group later weeks into phases (e.g. "Weeks 13-26: Practice & consolidation"). NEVER exceed 12 items.
 Generate 5-7 daily_tasks starting day_offset 0 (today).
 """
-    response = await _llm_complete(system_msg, prompt, session_id, max_tokens=4096)
+    response = await _llm_complete(system_msg, prompt, session_id, max_tokens=16000)
     text = _strip_fences(response)
     try:
         plan = json.loads(text)

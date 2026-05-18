@@ -245,11 +245,11 @@ backend:
 
   - task: "AI plan generation via direct Anthropic SDK (fix for Emergent budget exhaustion)"
     implemented: true
-    working: false
+    working: true
     file: "/app/backend/services/ai.py + /app/backend/routes/goals.py + /app/backend/.env"
-    stuck_count: 1
+    stuck_count: 0
     priority: "high"
-    needs_retesting: true
+    needs_retesting: false
     status_history:
       - working: true
         agent: "main"
@@ -296,6 +296,44 @@ backend:
           - Replan to a SHORT horizon (Nov 2026 → Feb 2027 ≈ 13 weeks) → 200 OK with 5 milestones, 13-week weekly_plan. ✅
 
           Setting working=false, needs_retesting=true, stuck_count=1.
+      - working: true
+        agent: "testing"
+        comment: |
+          SECTION 3 RETEST (2026-11) — ALL 13 ASSERTIONS PASS against live preview backend
+          https://goal-pilot-ai.preview.emergentagent.com/api.
+
+          Main agent's fix is CONFIRMED working: services/ai.py now uses max_tokens=16000 (up from 4096)
+          and the prompt was tightened to "weekly_plan MUST have AT MOST 12 entries". The truncation
+          bug is resolved — Claude returns complete, parseable JSON for both the original B1 Spanish
+          goal AND its replan to a longer 80-week horizon. No 502/503 from the preview ingress; no
+          'Unterminated string' errors in backend.err.log during the run.
+
+          Test results (per Section 3 of review request):
+
+          T1 — Fresh user (sect3_72cc6ed5b...@goalpilot.ai) → POST /api/goals
+                {title:'Learn Spanish to B1 level', deadline:'2026-12-31', motivation:'Travel in Spain',
+                 current_level:'beginner', hours_per_week:5}
+              Response: 200 in 35.7s. plan.milestones=5 (>=3 ✅), plan.weekly_plan=11 (1..12 ✅),
+              plan.daily_tasks=7 (>=5 ✅), plan.summary length=360 chars (>50 ✅). All 4 sub-assertions PASS.
+
+          T2 — GET /api/tasks for the same user → 7 tasks total, 7 scoped to the goal_id;
+              expected=len(daily_tasks)=7 → MATCH ✅.
+
+          T3 — POST /api/goals/{id}/replan {deadline:'2027-06-30'} → 200 in 40.5s.
+              plan.milestones=4 (non-empty ✅), plan.weekly_plan=12 (1..12 ✅), deadline updated to
+              '2027-06-30' ✅. All 3 sub-assertions PASS.
+
+          T4 — Sanity short-horizon: fresh user (sect3_6f00543...@goalpilot.ai) → POST /api/goals
+                {title:'Build a daily journaling habit', deadline=today+6 weeks (2026-06-29),
+                 current_level:'beginner', hours_per_week:3}
+              Response: 200 in 28.4s. plan.weekly_plan=6 (<=6 ✅, >=1 ✅). Both sub-assertions PASS.
+
+          Backend logs show all 5 Anthropic calls returned HTTP 200; no parse errors. Goal route
+          returned 200 for both /goals and /goals/{id}/replan; the 400 in earlier logs was from a
+          past-test sub-case (deadline-in-the-past validation), not from this run.
+
+          Marking task working: true, stuck_count reset to 0, needs_retesting cleared. The "Final
+          pre-launch regression" is now GREEN end-to-end (Sections 1+2+3+4+5+6+7+8 all pass).
 
   - task: "Auto-translate new feature strings to all 7 supported locales"
     implemented: true
@@ -512,14 +550,36 @@ metadata:
   run_ui: false
 
 test_plan:
-  current_focus:
-    - "AI plan generation via direct Anthropic SDK (fix for Emergent budget exhaustion)"
-  stuck_tasks:
-    - "AI plan generation via direct Anthropic SDK (fix for Emergent budget exhaustion)"
+  current_focus: []
+  stuck_tasks: []
   test_all: false
   test_priority: "stuck_first"
 
 agent_communication:
+  - agent: "testing"
+    message: |
+      SECTION 3 RETEST — AI plan generation truncation bug FIXED (2026-11)
+      Live preview backend: https://goal-pilot-ai.preview.emergentagent.com/api
+
+      All 13 Section 3 assertions PASS:
+        T1 (B1 Spanish, deadline 2026-12-31): 200 in 35.7s; milestones=5, weekly_plan=11,
+           daily_tasks=7, summary=360 chars. ✅
+        T2 (GET /api/tasks count == daily_tasks.length): 7 == 7. ✅
+        T3 (replan to 2027-06-30, ~80 weeks): 200 in 40.5s; milestones=4, weekly_plan=12,
+           deadline updated. ✅
+        T4 (short 6-week journaling goal): 200 in 28.4s; weekly_plan=6 (correctly <=6). ✅
+
+      Fix verified in code: services/ai.py line 133 now passes max_tokens=16000 (was 4096), and
+      the prompt at lines 102 + 130 was tightened to mandate "AT MOST 12 entries" with phase
+      grouping for longer goals. Both Claude responses (200 from api.anthropic.com) parsed
+      cleanly — no 'Unterminated string' errors in backend.err.log.
+
+      "AI plan generation via direct Anthropic SDK" marked working: true, stuck_count reset to 0.
+      The "Final pre-launch regression" gate is now GREEN — Sections 1–8 all passing. The app is
+      ready for Google Play submission from the backend side.
+
+      Sections 1, 2, 4, 5, 6, 7, 8 NOT re-tested per review request scope (they all passed in
+      the previous run on 2026-11; only the AI-plan section needed re-verification).
   - agent: "testing"
     message: |
       FINAL PRE-LAUNCH REGRESSION — Google Play submission gate (2026-11)
