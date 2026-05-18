@@ -12,7 +12,7 @@ from starlette.middleware.cors import CORSMiddleware
 
 # Loads .env via core.config import-time
 from core.db import client, db  # noqa: F401
-from routes import auth, goals, tasks, dashboard, nudge, checkout, calendar, notifications
+from routes import auth, goals, tasks, dashboard, nudge, checkout, calendar, notifications, legal
 from services.scheduler import start_scheduler, stop_scheduler
 
 logging.basicConfig(level=logging.INFO)
@@ -30,6 +30,7 @@ api.include_router(nudge.router)
 api.include_router(checkout.router)
 api.include_router(calendar.router)
 api.include_router(notifications.router)
+api.include_router(legal.router)
 
 
 @api.get('/')

@@ -213,13 +213,43 @@ backend:
         agent: "testing"
         comment: "All 8 live-backend assertions PASS against https://goal-pilot-ai.preview.emergentagent.com/api. (1) GET /api/notifications/prefs without token -> 401. (2) Fresh user (notif_fresh_<uuid>@goalpilot.ai, registered on-the-fly) GET returns exactly {'morning': True, 'streak': True}. (3) PATCH {'morning': false} -> 200 {'morning': false, 'streak': true}; subsequent GET confirms persistence. (4) PATCH {'streak': false} (on user now with morning=false) -> 200 {'morning': false, 'streak': false} (partial merge retained morning=false). (5) PATCH {'morning': true, 'streak': true} -> 200 defaults restored. (6) PATCH with empty body {} -> 200 and returns current prefs unchanged {'morning': true, 'streak': true}. (7) PATCH without Authorization header -> 401. Scheduler integration verified via direct async call to services.scheduler._build_user_message: user with {'morning': False, 'streak': False} returned None; user with {'morning': True, 'streak': False} and no history also returned None (streak_start correctly gated by streak_on); user with both True + no history returned a streak_start push message. notification_prefs is correctly wired end-to-end into the daily push job."
 
-  - task: "AI plan generation via direct Anthropic SDK (fix for Emergent budget exhaustion)"
+  - task: "Public legal pages for Play Store (/api/legal/privacy, /terms, /refund)"
     implemented: true
     working: true
-    file: "/app/backend/services/ai.py + /app/backend/routes/goals.py + /app/backend/.env"
+    file: "/app/backend/routes/legal.py + /app/backend/server.py"
     stuck_count: 0
     priority: "high"
     needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: |
+          NEW public routes (no auth required) returning HTML for Privacy Policy, Terms of Service, Refund Policy.
+          Required for Google Play Console submission (Privacy Policy URL field).
+          Routes:
+            GET /api/legal/privacy -> 200 HTMLResponse (GDPR-compliant, Czech jurisdiction)
+            GET /api/legal/terms   -> 200 HTMLResponse
+            GET /api/legal/refund  -> 200 HTMLResponse
+            GET /api/legal/<other> -> 404
+          Verified locally via curl: 200/200/200/404.
+      - working: true
+        agent: "testing"
+        comment: |
+          Final pre-launch regression — all 4 legal endpoints verified against live preview backend (https://goal-pilot-ai.preview.emergentagent.com/api).
+          - GET /api/legal/privacy → 200, Content-Type 'text/html; charset=utf-8', body 5713 bytes, contains "Privacy Policy", "GDPR", "Czech Republic". ✅
+          - GET /api/legal/terms → 200 + html + contains "Terms of Service", "Subscription plans", "Acceptable use". ✅
+          - GET /api/legal/refund → 200 + html + contains "Refund Policy", "14-day", "Czech Civil Code". ✅
+          - GET /api/legal/random → 404 with detail "Unknown legal page 'random'. Available: privacy, terms, refund.". ✅
+          - All 3 happy paths return successfully WITHOUT an Authorization header (public routes confirmed). ✅
+          Minor (CDN-only, NOT a backend bug): Cloudflare's "Email Address Obfuscation" feature rewrites the literal `goalpilot@goal-pilot.com` in the raw HTML response to `<span class="__cf_email__" data-cfemail="...">[email&#160;protected]</span>` plus a `cloudflare-static/email-decode.min.js` script tag. The email is restored client-side in any browser — Play Store reviewers and end users will see it rendered correctly. To remove this, main agent can either (a) disable "Email Address Obfuscation" in Cloudflare dashboard for the preview/prod domain, or (b) render the email as plain text instead of a `<a href="mailto:...">` anchor in routes/legal.py. NOT a launch blocker.
+
+  - task: "AI plan generation via direct Anthropic SDK (fix for Emergent budget exhaustion)"
+    implemented: true
+    working: false
+    file: "/app/backend/services/ai.py + /app/backend/routes/goals.py + /app/backend/.env"
+    stuck_count: 1
+    priority: "high"
+    needs_retesting: true
     status_history:
       - working: true
         agent: "main"
@@ -240,6 +270,32 @@ backend:
           Flow 3 — Profile: Avatar, "Tester", tester@goalpilot.ai, FREE PLAN badge present. profile-cancel-sub-btn count=0 (correctly hidden for free user). Privacy/Terms/Refund rows all present and tappable. Privacy Policy renders with markdown content (2436 chars, includes effective date, GDPR section, data subject rights). "Delete account" red button at bottom present (NOT tapped). ✅
           Flow 4 — Spanish locale: Switched to Español. Verified translations: Perfil, Política de privacidad, Términos del servicio, Política de reembolsos, Eliminar cuenta, plus tabs Hoy/Metas/Revisión/Perfil. Switched back to English (US). ✅
           No console errors observed.
+      - working: false
+        agent: "testing"
+        comment: |
+          REGRESSION FOUND during final pre-launch test (2026-11). The Anthropic call now succeeds reliably (Section 1/2/4/5/6/7/8 all green) BUT the LLM output is being TRUNCATED for long-horizon goals, causing JSON parse errors and HTTP 500 (surfaced as 502 by the Kubernetes ingress).
+
+          Repro:
+          1) Fresh user → POST /api/goals { title:'Learn Spanish to B1 level', deadline:'2026-12-31', motivation:'Travel in Spain', current_level:'beginner', hours_per_week:5 } → first attempt failed with 502 'preview environment is not responding'; backend.err.log shows: `ERROR:services.ai:AI parse error: Unterminated string starting at: line 359 column 19 (char 12599) ... ERROR:routes.goals:AI generation failed: AI returned malformed JSON`. Second retry sometimes succeeds when Claude happens to fit the output under 4096 output tokens. Anthropic itself returns 200; the response is just cut short by the max_tokens cap.
+          2) POST /api/goals/{id}/replan { deadline:'2027-06-30' } (the exact value from the review request) → 502 reproducibly. Logs: `Unterminated string starting at: line 319 column 17 (char 15041) ... Replan AI generation failed: AI returned malformed JSON`. Tried 4+ times — same truncation.
+
+          Root cause: services/ai.py:51 calls `_llm_complete(..., max_tokens=4096)` for plan generation. The prompt asks for `summary`, `why_it_works`, `feasibility_reason`, 3-5 milestones, up to weeks_available weekly_plan rows (32 weeks for the B1 goal, 58 weeks for the replan), AND 5-7 daily_tasks. Claude Sonnet's JSON output for 30+ week plans regularly exceeds 4096 output tokens, so `messages.create` hits the cap and emits a truncated string mid-week. `json.loads` fails → backend raises 503 → preview ingress surfaces as 502 to the client.
+
+          Shorter goals work: 6-13 week goals (e.g. 'Build a habit of journaling', 'Run 5k') replan/generate fine and return milestones/weekly_plan/daily_tasks/summary as expected.
+
+          Impact for Google Play submission: Reviewers/users creating any goal longer than ~5-6 months OR replanning to a longer horizon will see the AI plan fail with a generic 503 "couldn't generate your plan" message. THIS IS A LAUNCH BLOCKER for the AI flow as exercised by the review request.
+
+          Fix options (main agent, pick one):
+            (a) Raise max_tokens in services/ai.py to 8192 or 16384 (Claude Sonnet 4.5 supports up to 64k output tokens).
+            (b) Constrain the prompt to cap weekly_plan length at 12 weeks even for longer horizons (the prompt already mentions this in passing but Claude is ignoring it — make it MUST/uppercase and remove the "Generate exactly {weeks_available} weeks" line).
+            (c) Retry on JSON-truncation: if json.loads fails because of "Unterminated string", append the truncated buffer + 'Please re-emit complete JSON only' and call Claude again — but this is more complex and burns more tokens.
+          Recommendation: do (a) AND (b) together. (a) is a 1-line change.
+
+          Other Section 3 results from the run:
+          - GET /tasks after a successful POST /goals returned tasks count == daily_tasks length (7=7). ✅ (so the persistence still works when AI returns valid JSON).
+          - Replan to a SHORT horizon (Nov 2026 → Feb 2027 ≈ 13 weeks) → 200 OK with 5 milestones, 13-week weekly_plan. ✅
+
+          Setting working=false, needs_retesting=true, stuck_count=1.
 
   - task: "Auto-translate new feature strings to all 7 supported locales"
     implemented: true
@@ -456,12 +512,66 @@ metadata:
   run_ui: false
 
 test_plan:
-  current_focus: []
-  stuck_tasks: []
+  current_focus:
+    - "AI plan generation via direct Anthropic SDK (fix for Emergent budget exhaustion)"
+  stuck_tasks:
+    - "AI plan generation via direct Anthropic SDK (fix for Emergent budget exhaustion)"
   test_all: false
-  test_priority: "high_first"
+  test_priority: "stuck_first"
 
 agent_communication:
+  - agent: "testing"
+    message: |
+      FINAL PRE-LAUNCH REGRESSION — Google Play submission gate (2026-11)
+      Live preview backend: https://goal-pilot-ai.preview.emergentagent.com/api
+      Test results: 21/25 backend assertions PASS, 4 FAIL (all 4 failures rooted in a SINGLE
+      backend bug — AI plan truncation).
+
+      Section-by-section:
+        S1-legal           4/5 pass — privacy/terms/refund happy paths + /random 404 all green; minor CDN-only note re Cloudflare email obfuscation (NOT a backend bug, see legal-task status_history).
+        S2-auth            5/5 pass — tester login, /auth/me confirms plan=pro & billing=monthly (reviewer upgrade persisted), fresh register, locale=es, timezone=Europe/Prague.
+        S3-ai-plan         0/3 pass — see below. LAUNCH BLOCKER.
+        S4-stripe          2/2 pass — checkout returns cs_live_..., webhook bad-sig→400.
+        S5-cancel-delete   2/2 pass — subscription/cancel pro→free + /me confirms; account deletion cascades users/goals/tasks AND anonymizes payment_transactions (pt_user_link=0 pt_anon=1).
+        S6-notif-sched     3/3 pass — defaults true/true, PATCH morning:false persists, scheduler 'hourly tick' grep matches=29.
+        S7-dash-nudge-review 3/3 pass — dashboard stats has all 6 keys, nudge 200, weekly review has completion_rate+summary(>=30 chars)+suggestion.
+        S8-calendar        2/2 pass — /calendar/url returns token, /calendar/export.ics text/calendar + BEGIN:VCALENDAR.
+
+      CRITICAL: AI plan generation truncation (services/ai.py max_tokens=4096)
+      ──────────────────────────────────────────────────────────────────────
+      Anthropic itself returns HTTP 200, but the model output is cut mid-string by the 4096
+      output-token cap whenever the requested plan spans ~30+ weeks. json.loads then raises
+      "Unterminated string starting at: line N column M" — backend correctly raises 503, the
+      preview ingress surfaces this as HTTP 502 to clients.
+
+      Reproduced on the exact happy paths from the review request:
+        • POST /goals { title:'Learn Spanish to B1 level', deadline:'2026-12-31', ...}
+          → first attempt 502; backend logs: AI parse error char 12599; raw cut mid-week 18 of weekly_plan.
+        • POST /goals/{id}/replan { deadline:'2027-06-30' } → 502 every time (4 retries);
+          backend logs: AI parse error char 15041; raw cut mid-week ~30 of weekly_plan.
+
+      Shorter plans work fine: a 13-week 'journaling habit' goal generated AND replanned
+      successfully (5 milestones, 13 weekly_plan rows, 7 daily_tasks).
+
+      Recommended fixes (1-line each, main agent please pick BOTH):
+        (1) services/ai.py: bump max_tokens=4096 → 16384 (Claude Sonnet 4.5 supports 64k output).
+        (2) services/ai.py prompt: change "Generate exactly {weeks_available} weeks of weekly_plan"
+            to "Generate at most 12 weeks of weekly_plan, grouping later weeks into phases"
+            (the current "or 12 if more than 12 weeks — group later weeks" hint is ignored by Claude).
+
+      DO NOT regress: the legal/auth/stripe/cancel/delete/notifications/dashboard/calendar
+      flows all work. After applying the AI fix, please retest only the AI generation +
+      replan flows (Section 3).
+
+      Cloudflare email obfuscation note (S1, minor only, NOT a blocker):
+        The raw HTML of /api/legal/privacy etc does not contain the literal substring
+        'goalpilot@goal-pilot.com' — Cloudflare replaces all mailto: addresses with an
+        obfuscated <span data-cfemail="..."> that the cloudflare-static/email-decode.min.js
+        decrypts client-side. Reviewers/users will see the email correctly in a browser.
+        To silence this in raw HTML, either disable "Email Address Obfuscation" in the
+        Cloudflare dashboard for the preview/prod hostname, OR render the contact as plain
+        text instead of a mailto anchor in routes/legal.py.
+
   - agent: "main"
     message: |
       i18n integration is complete and verified visually. Backend additions:
