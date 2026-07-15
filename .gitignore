@@ -80,10 +80,7 @@ memory/test_credentials.md
 
 # Mobile development
 android-sdk/-e 
-# Environment and credential files
-.env
-.env.*
-*.env
+# Credential files (Emergent deployment reads .env from repo, so DON'T ignore .env files here)
 credentials.json
 *.pem
 *.key
