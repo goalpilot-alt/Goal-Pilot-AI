@@ -26,7 +26,7 @@ async def dashboard_stats(user: dict = Depends(get_current_user)):
     completed_docs = await db.tasks.find(
         {'user_id': user['id'], 'completed': True, 'due_date': {'$gte': since_date}},
         {'_id': 0, 'due_date': 1},
-    ).to_list(None)
+    ).to_list(500)
     completed_dates = {t['due_date'] for t in completed_docs if t.get('due_date')}
     streak = 0
     today_date = datetime.now(timezone.utc).date()

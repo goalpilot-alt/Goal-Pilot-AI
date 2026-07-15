@@ -97,10 +97,11 @@ async def create_goal(
     await db.goals.insert_one(goal_doc.copy())
 
     now = datetime.now(timezone.utc)
+    task_docs = []
     for t in goal_doc['plan'].get('daily_tasks', []):
         day_offset = t.get('day_offset', 0)
         due = (now + timedelta(days=day_offset)).date().isoformat()
-        await db.tasks.insert_one({
+        task_docs.append({
             'id': str(uuid.uuid4()),
             'user_id': user['id'],
             'goal_id': goal_id,
@@ -112,6 +113,8 @@ async def create_goal(
             'completed_at': None,
             'created_at': now.isoformat(),
         })
+    if task_docs:
+        await db.tasks.insert_many(task_docs)
 
     goal_doc.pop('_id', None)
 
