@@ -21,14 +21,22 @@ async def dashboard_stats(user: dict = Depends(get_current_user)):
         'completed': False,
     })
 
+    # Calculate streak: fetch distinct completion dates in last 60 days with a single query
+    since_date = (datetime.now(timezone.utc).date() - timedelta(days=60)).isoformat()
+    completed_docs = await db.tasks.find(
+        {'user_id': user['id'], 'completed': True, 'due_date': {'$gte': since_date}},
+        {'_id': 0, 'due_date': 1},
+    ).to_list(None)
+    completed_dates = {t['due_date'] for t in completed_docs if t.get('due_date')}
     streak = 0
+    today_date = datetime.now(timezone.utc).date()
     for i in range(0, 60):
-        d = (datetime.now(timezone.utc).date() - timedelta(days=i)).isoformat()
-        c = await db.tasks.count_documents({'user_id': user['id'], 'due_date': d, 'completed': True})
-        if c > 0:
+        d = (today_date - timedelta(days=i)).isoformat()
+        if d in completed_dates:
             streak += 1
         else:
             if i == 0:
+                # Skip today if empty (streak from yesterday still counts)
                 continue
             break
 
