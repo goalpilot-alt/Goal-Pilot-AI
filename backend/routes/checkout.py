@@ -2,22 +2,19 @@ import logging
 import uuid
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Request
-from emergentintegrations.payments.stripe.checkout import (
-    CheckoutSessionRequest, CheckoutSessionResponse, CheckoutStatusResponse,
-)
 
 from core.auth import get_current_user
 from core.config import PACKAGES
 from core.db import db
 from models.schemas import CheckoutSessionReq
-from services.stripe import get_checkout
+from services.stripe import create_checkout_session, get_checkout_status, verify_webhook
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
 @router.post('/checkout/session')
-async def create_checkout_session(
+async def create_checkout_session_route(
     req: CheckoutSessionReq,
     http_request: Request,
     user: dict = Depends(get_current_user),
@@ -30,7 +27,6 @@ async def create_checkout_session(
     success_url = f'{origin}/payment/success?session_id={{CHECKOUT_SESSION_ID}}'
     cancel_url = f'{origin}/pricing'
 
-    checkout = get_checkout(http_request)
     metadata = {
         'user_id': user['id'],
         'user_email': user['email'],
@@ -39,18 +35,22 @@ async def create_checkout_session(
         'billing': pkg['billing'],
     }
 
-    checkout_req = CheckoutSessionRequest(
-        amount=pkg['amount'],
-        currency=pkg['currency'],
-        success_url=success_url,
-        cancel_url=cancel_url,
-        metadata=metadata,
-    )
-    session: CheckoutSessionResponse = await checkout.create_checkout_session(checkout_req)
+    try:
+        session = await create_checkout_session(
+            amount=pkg['amount'],
+            currency=pkg['currency'],
+            success_url=success_url,
+            cancel_url=cancel_url,
+            metadata=metadata,
+            product_name=f"GoalPilot {pkg['plan'].title()} ({pkg['billing']})",
+        )
+    except Exception as e:
+        logger.error(f'Stripe session create failed: {e}')
+        raise HTTPException(status_code=502, detail='Payment provider error. Please try again.')
 
     await db.payment_transactions.insert_one({
         'id': str(uuid.uuid4()),
-        'session_id': session.session_id,
+        'session_id': session['session_id'],
         'user_id': user['id'],
         'user_email': user['email'],
         'package_id': req.package_id,
@@ -65,11 +65,11 @@ async def create_checkout_session(
         'updated_at': datetime.now(timezone.utc).isoformat(),
     })
 
-    return {'url': session.url, 'session_id': session.session_id}
+    return {'url': session['url'], 'session_id': session['session_id']}
 
 
 @router.get('/checkout/status/{session_id}')
-async def get_checkout_status(session_id: str, user: dict = Depends(get_current_user)):
+async def get_checkout_status_route(session_id: str, user: dict = Depends(get_current_user)):
     tx = await db.payment_transactions.find_one({'session_id': session_id, 'user_id': user['id']}, {'_id': 0})
     if not tx:
         raise HTTPException(status_code=404, detail='Transaction not found')
@@ -85,24 +85,23 @@ async def get_checkout_status(session_id: str, user: dict = Depends(get_current_
         }
 
     try:
-        checkout = get_checkout()
-        status: CheckoutStatusResponse = await checkout.get_checkout_status(session_id)
+        status = await get_checkout_status(session_id)
         update = {
-            'payment_status': status.payment_status,
-            'status': status.status,
+            'payment_status': status['payment_status'],
+            'status': status['status'],
             'updated_at': datetime.now(timezone.utc).isoformat(),
         }
         await db.payment_transactions.update_one({'session_id': session_id}, {'$set': update})
-        if status.payment_status == 'paid' and tx.get('payment_status') != 'paid':
+        if status['payment_status'] == 'paid' and tx.get('payment_status') != 'paid':
             await db.users.update_one(
                 {'id': user['id']},
                 {'$set': {'plan': tx['plan'], 'billing': tx['billing'], 'upgraded_at': datetime.now(timezone.utc).isoformat()}},
             )
         return {
-            'payment_status': status.payment_status,
-            'status': status.status,
-            'amount_total': status.amount_total,
-            'currency': status.currency,
+            'payment_status': status['payment_status'],
+            'status': status['status'],
+            'amount_total': status['amount_total'],
+            'currency': status['currency'],
             'plan': tx['plan'],
             'billing': tx['billing'],
         }
@@ -120,29 +119,30 @@ async def get_checkout_status(session_id: str, user: dict = Depends(get_current_
 
 @router.post('/webhook/stripe')
 async def stripe_webhook(request: Request):
-    """Stripe webhook — validates signature with STRIPE_WEBHOOK_SECRET. Idempotent."""
+    """Stripe webhook \u2014 validates signature with STRIPE_WEBHOOK_SECRET. Idempotent."""
     body = await request.body()
     signature = request.headers.get('Stripe-Signature', '')
-    checkout = get_checkout()
     try:
-        event = await checkout.handle_webhook(body, signature)
+        event = verify_webhook(body, signature)
     except Exception as e:
         logger.error(f'Stripe webhook validation error: {e}')
         raise HTTPException(status_code=400, detail='Invalid webhook')
 
-    event_type = getattr(event, 'event_type', None) or getattr(event, 'type', None)
-    logger.info(f'Stripe webhook received: type={event_type} session={event.session_id} status={event.payment_status}')
+    event_type = event.get('event_type')
+    session_id = event.get('session_id')
+    payment_status = event.get('payment_status')
+    logger.info(f'Stripe webhook received: type={event_type} session={session_id} status={payment_status}')
 
-    if event.payment_status == 'paid' and event.session_id:
-        tx = await db.payment_transactions.find_one({'session_id': event.session_id})
+    if payment_status == 'paid' and session_id:
+        tx = await db.payment_transactions.find_one({'session_id': session_id})
         if not tx:
-            logger.warning(f'Webhook paid for unknown session_id={event.session_id}')
+            logger.warning(f'Webhook paid for unknown session_id={session_id}')
             return {'ok': True, 'ignored': True}
         if tx.get('payment_status') == 'paid':
             return {'ok': True, 'already_processed': True}
 
         await db.payment_transactions.update_one(
-            {'session_id': event.session_id},
+            {'session_id': session_id},
             {'$set': {
                 'payment_status': 'paid',
                 'status': 'complete',

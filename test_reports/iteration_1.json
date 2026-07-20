@@ -1,0 +1,44 @@
+{
+  "summary": "Deploy-readiness regression PASSED. 23/23 backend tests green after post-refactor removal of emergentintegrations. Verified: Anthropic direct SDK plan generation (5 milestones, 12 weekly items, 7 daily tasks), Stripe official SDK LIVE mode (cs_live_... + checkout.stripe.com URL), invalid package -> 400, webhook bad signature -> 400, unknown checkout status -> 404, subscription cancel idempotent + downgrade with cancelled_at, DELETE /api/auth/account cascade delete + payment_transactions anonymization, public legal HTML (privacy/terms/refund) 200 + unknown -> 404, dashboard stats, weekly review (AI summary >=30 chars), tasks list + missed, notifications prefs GET/PATCH, calendar token + public ICS export starting BEGIN:VCALENDAR, scheduler 'Scheduler started' in logs. Tester account restored to plan=pro/billing=monthly after tests.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "GET /api/calendar/url", "issue": "Returns {\"token\": \"...\"} but the review spec / naming implies {\"url\": \"...\"}. Clients must build the full ICS URL themselves. Consider returning both keys or renaming."},
+      {"endpoint": "POST /api/subscription/upgrade", "issue": "Legacy mock endpoint bumps plan without payment verification, gated only by JWT. Not a Stripe path but exposed publicly — should be removed or admin-restricted before Play Store production release."},
+      {"endpoint": "app CORS middleware (server.py:42-48)", "issue": "allow_credentials=True combined with allow_origins=['*'] is spec-invalid and rejected by browsers when credentials are sent. Not blocking for token-header auth today, but tighten to explicit origins for production."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_deploy_readiness.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "(Optional, minor) Change GET /api/calendar/url to also return a full 'url' key (e.g. {token, url}) so callers don't have to concatenate.",
+    "(Recommended before Play Store) Restrict or remove POST /api/subscription/upgrade legacy mock — it currently lets any authenticated user change their plan without paying.",
+    "(Recommended before Play Store) Replace CORS allow_origins=['*'] with an explicit domain list since allow_credentials=True is set (browsers reject the wildcard+credentials combo).",
+    "(Cleanup) Remove the unused EMERGENT_LLM_KEY entry from backend/.env — post-refactor it is no longer read anywhere.",
+    "(Cleanup) auth.py imports ZoneInfoNotFoundError but never uses it (dead import)."
+  ],
+  "critical_code_review_comments": [
+    "requirements.txt is clean, public-PyPI-only — no emergentintegrations reference. Deploy-ready for Railway/Render.",
+    "services/ai.py exclusively uses direct AsyncAnthropic; no emergent fallback remains. Errors surface as 503 to client with a retry-friendly message.",
+    "services/stripe.py uses official stripe==15.0.1 SDK, converts amounts to cents, and verifies webhooks with stripe.Webhook.construct_event. Bad signatures raise -> checkout.py returns 400 'Invalid webhook' correctly.",
+    "routes/auth.py delete_account correctly anonymizes payment_transactions (user_id -> 'deleted_user', adds anonymized_at) and hard-deletes tasks/goals/push_tokens/idempotency_keys/push_log/users. Email is fail-soft.",
+    "routes/legal.py serves all three policies as text/html with 200; unknown paths return 404. Content is substantial (GDPR, Czech jurisdiction, Stripe/Anthropic/Resend disclosure) — Play Store compliant."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_deploy_readiness.py (new — 23-test regression suite)"
+  ],
+  "success_rate": {"backend": "100%", "frontend": "not tested (per request)"},
+  "seed_data_creation": "Ephemeral users created during delete-account test are self-cleaned. Tester account tester@goalpilot.ai was restored to plan=pro/billing=monthly after the subscription-cancel test so Play Store reviewers retain paid access.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Reuse /app/backend/tests/test_deploy_readiness.py — it is self-healing (upgrades tester to pro and cleans existing goals before AI plan test). Tester account is currently pro/monthly. If any test leaves it on free, run POST /api/subscription/upgrade?plan=pro&billing=monthly with tester bearer to restore. Anthropic and Stripe are LIVE — every AI test call costs money; the suite makes exactly 2 AI calls (plan + weekly review) and 3 Stripe API calls (2 session creates + 1 status lookup on a made-up id which the app skips as it's not in DB).",
+  "rca_of_issue": "N/A — no bugs found."
+}

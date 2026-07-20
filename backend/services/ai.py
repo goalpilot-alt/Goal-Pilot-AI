@@ -1,14 +1,13 @@
 """AI plan generation service.
 
-Prefers a direct Anthropic SDK call when ANTHROPIC_API_KEY is set (no proxy budget cap).
-Falls back to emergentintegrations LlmChat (Emergent universal key proxy) otherwise.
+Uses direct Anthropic SDK (no proxy budget cap, no private-package dependency).
 """
 import json
 import logging
 import os
 from datetime import datetime, timezone, date
 
-from core.config import EMERGENT_LLM_KEY, LOCALE_LANGUAGE_NAMES
+from core.config import LOCALE_LANGUAGE_NAMES
 
 logger = logging.getLogger(__name__)
 
@@ -41,36 +40,23 @@ def _days_between(start_iso: str, end_iso: str) -> int:
 
 
 async def _llm_complete(system_msg: str, prompt: str, session_id: str, max_tokens: int = 4096) -> str:
-    """Run the LLM. Prefer direct Anthropic SDK; fallback to Emergent proxy.
-
-    Raises on failure so callers can surface a clear error to the user.
-    """
-    if ANTHROPIC_KEY:
-        # Direct Anthropic SDK call (async)
-        from anthropic import AsyncAnthropic
-        client = AsyncAnthropic(api_key=ANTHROPIC_KEY)
-        msg = await client.messages.create(
-            model=ANTHROPIC_MODEL,
-            max_tokens=max_tokens,
-            system=system_msg,
-            messages=[{'role': 'user', 'content': prompt}],
-        )
-        # msg.content is a list of content blocks; concat text
-        parts = []
-        for block in msg.content:
-            text = getattr(block, 'text', None)
-            if text:
-                parts.append(text)
-        return ''.join(parts)
-
-    # Fallback to emergent proxy
-    from emergentintegrations.llm.chat import LlmChat, UserMessage
-    chat = LlmChat(
-        api_key=EMERGENT_LLM_KEY,
-        session_id=session_id,
-        system_message=system_msg,
-    ).with_model('anthropic', ANTHROPIC_MODEL)
-    return await chat.send_message(UserMessage(text=prompt))
+    """Call Anthropic Claude via the official SDK. Raises on failure."""
+    if not ANTHROPIC_KEY:
+        raise RuntimeError('ANTHROPIC_API_KEY is not configured')
+    from anthropic import AsyncAnthropic
+    client = AsyncAnthropic(api_key=ANTHROPIC_KEY)
+    msg = await client.messages.create(
+        model=ANTHROPIC_MODEL,
+        max_tokens=max_tokens,
+        system=system_msg,
+        messages=[{'role': 'user', 'content': prompt}],
+    )
+    parts = []
+    for block in msg.content:
+        text = getattr(block, 'text', None)
+        if text:
+            parts.append(text)
+    return ''.join(parts)
 
 
 async def generate_ai_plan(goal: dict, locale: str = 'en-US') -> dict:

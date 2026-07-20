@@ -550,10 +550,12 @@ metadata:
   run_ui: false
 
 test_plan:
-  current_focus: []
+  current_focus:
+    - "Removed emergentintegrations dep — Stripe via official SDK, AI via direct Anthropic SDK"
+    - "Public-PyPI-only requirements.txt (Railway/Render deployable)"
   stuck_tasks: []
   test_all: false
-  test_priority: "stuck_first"
+  test_priority: "high_first"
 
 agent_communication:
   - agent: "testing"
