@@ -5,12 +5,13 @@ import os
 ROOT_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(ROOT_DIR / '.env')
 
-MONGO_URL = os.environ['MONGO_URL']
-DB_NAME = os.environ['DB_NAME']
-JWT_SECRET = os.environ['JWT_SECRET']
+MONGO_URL = os.environ.get('MONGO_URL', 'mongodb://localhost:27017')
+DB_NAME = os.environ.get('DB_NAME', 'goalpilot')
+JWT_SECRET = os.environ.get('JWT_SECRET', 'change-me-in-prod')
 JWT_ALGO = 'HS256'
-EMERGENT_LLM_KEY = os.environ['EMERGENT_LLM_KEY']
-STRIPE_API_KEY = os.environ['STRIPE_API_KEY']
+# Optional — only used as a legacy fallback in ai.py. Safe to leave empty.
+EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY', '')
+STRIPE_API_KEY = os.environ.get('STRIPE_API_KEY', '')
 STRIPE_WEBHOOK_SECRET = os.environ.get('STRIPE_WEBHOOK_SECRET', '')
 
 # Server-side plan catalog — NEVER trust amounts from client

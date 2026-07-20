@@ -60,6 +60,15 @@ class TestHealth:
         data = r.json()
         assert data.get('status') == 'ok'
 
+    def test_healthz_internal(self, api_client):
+        """/healthz is the Railway liveness probe. Hit it directly on port 8001
+        because the preview Kubernetes ingress only routes /api/* to the backend
+        (all other paths land on the Expo frontend). On Railway it will be the
+        primary port on the container so this direct hit mirrors production."""
+        r = requests.get('http://127.0.0.1:8001/healthz', timeout=5)
+        assert r.status_code == 200, r.text
+        assert r.json() == {'ok': True}
+
 
 # ---------------------------------------------------------------------------
 # Auth

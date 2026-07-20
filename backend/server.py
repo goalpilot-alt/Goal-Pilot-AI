@@ -38,6 +38,12 @@ async def root():
     return {'app': 'GoalPilot AI', 'status': 'ok'}
 
 
+@app.get('/healthz')
+async def healthz():
+    """Lightweight health check — no auth, no DB call. Used by Railway/Render/K8s liveness probes."""
+    return {'ok': True}
+
+
 app.include_router(api)
 app.add_middleware(
     CORSMiddleware,
@@ -50,11 +56,15 @@ app.add_middleware(
 
 @app.on_event('startup')
 async def on_start():
-    await db.users.create_index('email', unique=True)
-    await db.goals.create_index('user_id')
-    await db.tasks.create_index([('user_id', 1), ('due_date', 1)])
-    await db.idempotency_keys.create_index([('user_id', 1), ('key', 1)], unique=True)
-    await db.idempotency_keys.create_index('created_at', expireAfterSeconds=60 * 60 * 26)  # 26h TTL
+    # DB indexes — fail-soft so a slow Atlas cold-start doesn't crash the whole app
+    try:
+        await db.users.create_index('email', unique=True)
+        await db.goals.create_index('user_id')
+        await db.tasks.create_index([('user_id', 1), ('due_date', 1)])
+        await db.idempotency_keys.create_index([('user_id', 1), ('key', 1)], unique=True)
+        await db.idempotency_keys.create_index('created_at', expireAfterSeconds=60 * 60 * 26)  # 26h TTL
+    except Exception as e:
+        logger.error(f'Index creation failed (non-fatal): {e}')
     # Start daily push scheduler
     try:
         start_scheduler()
