@@ -165,16 +165,12 @@ async def stripe_webhook(request: Request):
 
 @router.post('/subscription/upgrade')
 async def upgrade(plan: str, billing: str = 'monthly', user: dict = Depends(get_current_user)):
-    """Legacy mock kept for backward compat. Do not use for real upgrades."""
-    if plan not in ('free', 'pro', 'coach'):
-        raise HTTPException(status_code=400, detail='Invalid plan')
-    if billing not in ('monthly', 'annual'):
-        raise HTTPException(status_code=400, detail='Invalid billing cycle')
-    await db.users.update_one(
-        {'id': user['id']},
-        {'$set': {'plan': plan, 'billing': billing, 'upgraded_at': datetime.now(timezone.utc).isoformat()}},
-    )
-    return {'ok': True, 'plan': plan, 'billing': billing}
+    """DEPRECATED — this endpoint used to let any authenticated user flip their plan.
+
+    It has been intentionally disabled to prevent free upgrades in production.
+    Real upgrades happen via the Stripe webhook after a successful payment.
+    """
+    raise HTTPException(status_code=410, detail='Endpoint deprecated. Use /api/checkout/session to upgrade.')
 
 
 @router.post('/subscription/cancel')
